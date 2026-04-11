@@ -17,6 +17,16 @@ defaultResources:
   limits:
     memory: 256Mi
 
+# ── Ingress ───────────────────────────────────────────────────────────────────
+# Routes cortex.lan → api:8000 through the Envoy Gateway.
+# After enabling, add a DNS override in AdGuard: cortex.lan → 192.168.0.245
+ingress:
+  enabled: true
+  hostname: cortex.lan
+  gatewayName: envoy-gateway
+  gatewayNamespace: networking
+  sectionName: https-lan
+
 # ── Secrets (override via --set or a sealed-secrets / external-secrets flow) ──
 secrets:
   sovereignAdminPassword: "changeme"
