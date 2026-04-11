@@ -28,6 +28,10 @@ spec:
     spec:
       nodeSelector:
         {{- toYaml $.Values.nodeSelector | nindent 8 }}
+      {{- if or $svc.storage $svc.workspaceStorage }}
+      securityContext:
+        fsGroup: 65532
+      {{- end }}
       containers:
         - name: {{ $name }}
           image: "{{ $.Values.image.registry }}/cortex-{{ $name }}:{{ $.Values.image.tag }}"
@@ -82,7 +86,6 @@ spec:
         - name: docker-sock
           hostPath:
             path: /var/run/docker.sock
-            type: Socket
         {{- end }}
       {{- end }}
 {{- end }}

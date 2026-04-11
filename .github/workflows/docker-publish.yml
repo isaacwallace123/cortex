@@ -83,17 +83,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Use a PAT or the default token; push requires write permission.
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Stamp image tag in values.yaml
-        run: |
-          sed -i "s|^  tag: .*|  tag: ${{ github.sha }}|" deploy/helm/cortex/values.yaml
+          ref: main
 
       - name: Commit updated values.yaml
         run: |
+          sed -i "s|^  tag: .*|  tag: ${{ github.sha }}|" deploy/helm/cortex/values.yaml
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deploy/helm/cortex/values.yaml
-          git commit -m "chore: bump image tag to ${{ github.sha }}" || echo "Nothing to commit"
+          git diff --cached --quiet && echo "Nothing to commit" && exit 0
+          git commit -m "chore: bump image tag to ${{ github.sha }}"
+          git pull --rebase origin main
           git push
