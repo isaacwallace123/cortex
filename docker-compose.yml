@@ -1,0 +1,406 @@
+﻿name: cortex
+
+services:
+
+  # ---
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+      - ./deploy/docker/ollama-init.sh:/ollama-init.sh:ro
+    entrypoint: ["/bin/sh", "/ollama-init.sh"]
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    expose:
+      - "11434"
+    healthcheck:
+      test: ["CMD", "ollama", "ls"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ---
+  # Session persistence. SQLite-backed. No external dependencies.
+  memory:
+    build:
+      context: .
+      dockerfile: services/memory/Dockerfile
+    environment:
+      MEMORY_ADDR: :7070
+      MEMORY_DB_PATH: /data/memory.db
+    expose:
+      - "7070"
+      - "7071"
+    volumes:
+      - memory-data:/data
+    restart: unless-stopped
+
+  # ---
+  inference:
+    build:
+      context: .
+      dockerfile: services/inference/Dockerfile
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      INFERENCE_DEFAULT_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      INFERENCE_ADDR: :9090
+    expose:
+      - "9090"
+      - "9091"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---
+  # Runs approved shell steps on behalf of Vector.
+  shell:
+    build:
+      context: .
+      dockerfile: services/shell/Dockerfile
+    environment:
+      SHELL_ADDR: :4040
+    expose:
+      - "4040"
+      - "4041"
+    restart: unless-stopped
+
+  # ---
+  # Performs sandboxed file operations on behalf of Vector.
+  forge:
+    build:
+      context: .
+      dockerfile: services/forge/Dockerfile
+    environment:
+      FORGE_ADDR: :5050
+      FORGE_ROOT: /workspace
+    expose:
+      - "5050"
+      - "5051"
+    volumes:
+      - forge-workspace:/workspace
+    restart: unless-stopped
+
+  # ---
+  # Pub/sub event bus. SQLite-backed. Streams events to subscribers.
+  nerva:
+    build:
+      context: .
+      dockerfile: services/nerva/Dockerfile
+    environment:
+      NERVA_ADDR: :3030
+      NERVA_DB_PATH: /data/nerva.db
+    ports:
+      - "3030:3030"
+    expose:
+      - "3031"
+    volumes:
+      - nerva-data:/data
+    restart: unless-stopped
+
+  # ---
+  # Approval gate â€” evaluates plan steps before execution.
+  policy:
+    build:
+      context: .
+      dockerfile: services/policy/Dockerfile
+    environment:
+      POLICY_ADDR: :6060
+      POLICY_DB: /data/policy.db
+    expose:
+      - "6060"
+      - "6061"
+    volumes:
+      - policy-data:/data
+    restart: unless-stopped
+
+  # ---
+  brain:
+    build:
+      context: .
+      dockerfile: services/brain/Dockerfile
+    environment:
+      INFERENCE_ADDR: inference:9090
+      MEMORY_ADDR: memory:7070
+      POLICY_ADDR: policy:6060
+      SHELL_ADDR: shell:4040
+      FORGE_ADDR: forge:5050
+      NERVA_ADDR: nerva:3030
+      COURIER_ADDR: courier:2020
+      ATLAS_ADDR: atlas:6161
+      CRUCIBLE_ADDR: crucible:7272
+      VAULT_ADDR: vault:8181
+      ARSENAL_ADDR: arsenal:7373
+      COMPASS_ADDR: compass:5151
+      WORKSPACE_ADDR: workspace:6262
+      BEACON_ADDR: beacon:5252
+      BRAIN_HTTP_ADDR: :8080
+      BRAIN_GRPC_ADDR: :8090
+    expose:
+      - "8080"
+      - "8090"
+    depends_on:
+      - inference
+      - memory
+      - nerva
+      - policy
+      - shell
+      - forge
+      - courier
+      - atlas
+      - crucible
+      - vault
+      - arsenal
+      - compass
+      - workspace
+      - beacon
+    restart: unless-stopped
+
+  # ---
+  # Scrapes /metrics from brain (and future services). Reachable at :9090.
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    depends_on:
+      - brain
+    restart: unless-stopped
+
+  # ---
+  # Executes kubectl commands against a configured cluster.
+  # Mount a kubeconfig via ATLAS_KUBECONFIG or use in-cluster service account.
+  atlas:
+    build:
+      context: .
+      dockerfile: services/atlas/Dockerfile
+    environment:
+      ATLAS_ADDR: :6161
+      ATLAS_KUBECONFIG: ${ATLAS_KUBECONFIG:-}
+    expose:
+      - "6161"
+      - "6162"
+    restart: unless-stopped
+
+  # ---
+  # Manages ephemeral Docker containers for safe code execution.
+  # Requires the host Docker socket so it can spawn sandbox containers.
+  crucible:
+    build:
+      context: .
+      dockerfile: services/crucible/Dockerfile
+    environment:
+      CRUCIBLE_ADDR: :7272
+    expose:
+      - "7272"
+      - "7273"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  # ---
+  # Stores named chats and their message history. SQLite-backed.
+  chat:
+    build:
+      context: .
+      dockerfile: services/chat/Dockerfile
+    environment:
+      CHAT_ADDR: :9191
+      CHAT_DB_PATH: /data/chat.db
+    expose:
+      - "9191"
+      - "9192"
+    volumes:
+      - chat-data:/data
+    restart: unless-stopped
+
+  # ---
+  # Cross-session knowledge base. SQLite FTS5-backed. No external dependencies.
+  vault:
+    build:
+      context: .
+      dockerfile: services/vault/Dockerfile
+    environment:
+      VAULT_ADDR: :8181
+      VAULT_DB_PATH: /data/vault.db
+    expose:
+      - "8181"
+      - "8182"
+    volumes:
+      - vault-data:/data
+    restart: unless-stopped
+
+  # ---
+  # Manages projects, milestones, tasks, and decisions. SQLite-backed.
+  compass:
+    build:
+      context: .
+      dockerfile: services/compass/Dockerfile
+    environment:
+      COMPASS_PORT: "5151"
+      COMPASS_DB: /data/compass.db
+    expose:
+      - "5151"
+      - "5152"
+    volumes:
+      - compass-data:/data
+    restart: unless-stopped
+
+  # ---
+  # User accounts, bcrypt passwords, opaque session tokens.
+  sovereign:
+    build:
+      context: .
+      dockerfile: services/sovereign/Dockerfile
+    environment:
+      SOVEREIGN_ADDR: :4141
+      SOVEREIGN_DB: /data/sovereign.db
+      SOVEREIGN_ADMIN_PASSWORD: ${SOVEREIGN_ADMIN_PASSWORD:-admin}
+    expose:
+      - "4141"
+      - "4142"
+    volumes:
+      - sovereign-data:/data
+    restart: unless-stopped
+
+  # ---
+  # Manages user workspaces. SQLite-backed.
+  workspace:
+    build:
+      context: .
+      dockerfile: services/workspace/Dockerfile
+    environment:
+      WORKSPACE_PORT: "6262"
+      WORKSPACE_DB: /data/workspace.db
+    expose:
+      - "6262"
+      - "6263"
+    volumes:
+      - workspace-data:/data
+    restart: unless-stopped
+
+  # ---
+  # Stores and serves tool definitions. Brain queries this at plan time.
+  arsenal:
+    build:
+      context: .
+      dockerfile: services/arsenal/Dockerfile
+    environment:
+      ARSENAL_PORT: "7373"
+      ARSENAL_DB: /data/arsenal.db
+    expose:
+      - "7373"
+      - "7374"
+    volumes:
+      - arsenal-data:/data
+    restart: unless-stopped
+
+  # ---
+  # Overwatch: anomaly analysis engine — scrapes Prometheus and emits alerts to Nerva.
+  overwatch:
+    build:
+      context: .
+      dockerfile: services/overwatch/Dockerfile
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      NERVA_ADDR: nerva:3030
+      OVERWATCH_INTERVAL: "60"
+      OVERWATCH_METRICS_ADDR: :8484
+    expose:
+      - "8484"
+    depends_on:
+      - prometheus
+      - nerva
+    restart: unless-stopped
+
+  # ---
+  # Web search and HTTP fetch. Configure a search backend via env vars.
+  beacon:
+    build:
+      context: .
+      dockerfile: services/beacon/Dockerfile
+    environment:
+      BEACON_ADDR: :5252
+      BEACON_SEARXNG_URL: ${BEACON_SEARXNG_URL:-}
+      BEACON_BRAVE_API_KEY: ${BEACON_BRAVE_API_KEY:-}
+    expose:
+      - "5252"
+      - "5253"
+    restart: unless-stopped
+
+  # ---
+  # Accepts persistent bidirectional gRPC streams from Relay Agents and Halo Edge.
+  courier:
+    build:
+      context: .
+      dockerfile: services/courier/Dockerfile
+    environment:
+      COURIER_ADDR: :2020
+      NERVA_ADDR: nerva:3030
+    ports:
+      - "2020:2020"
+    expose:
+      - "2021"
+    depends_on:
+      - nerva
+    restart: unless-stopped
+
+  # ---
+  # Only service reachable from the host.
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      BRAIN_GRPC_ADDR: brain:8090
+      MEMORY_GRPC_ADDR: memory:7070
+      CHAT_GRPC_ADDR: chat:9191
+      COMPASS_GRPC_ADDR: compass:5151
+      POLICY_GRPC_ADDR: policy:6060
+      SOVEREIGN_GRPC_ADDR: sovereign:4141
+      WORKSPACE_GRPC_ADDR: workspace:6262
+      API_ADDR: :8000
+      API_KEY: ${CORTEX_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - brain
+      - memory
+      - chat
+      - compass
+      - sovereign
+      - workspace
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
+    name: cortex-ollama-models
+  memory-data:
+    name: cortex-memory-data
+  forge-workspace:
+    name: cortex-forge-workspace
+  nerva-data:
+    name: cortex-nerva-data
+  policy-data:
+    name: cortex-policy-data
+  chat-data:
+    name: cortex-chat-data
+  vault-data:
+    name: cortex-vault-data
+  arsenal-data:
+    name: cortex-arsenal-data
+  compass-data:
+    name: cortex-compass-data
+  sovereign-data:
+    name: cortex-sovereign-data
+  workspace-data:
+    name: cortex-workspace-data
+

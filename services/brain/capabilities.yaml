@@ -1,0 +1,32 @@
+service: brain
+version: "0.1.0"
+description: |
+  Brain is the orchestration and reasoning core of Cortex.
+  It receives user input, understands intent (Prism), creates plans (Axiom),
+  and coordinates execution across executors (Vector).
+
+capabilities:
+  - parse_input       # extract intent and entities from raw user input
+  - create_plan       # produce a structured execution plan from a parsed task
+
+internal_modules:
+  prism: input understanding
+  axiom: reasoning and planning
+  vector: routing and orchestration (future)
+
+ports:
+  depends_on:
+    - inference       # LLM access layer
+    - telemetry       # event emission
+
+transport:
+  http:
+    addr: ":8080"
+    endpoints:
+      - POST /v1/brain/parse
+      - POST /v1/brain/plan
+      - GET  /healthz
+  grpc:
+    status: planned   # milestone 2
+
+milestone: 1

@@ -1,0 +1,119 @@
+﻿syntax = "proto3";
+
+package chat.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/chat/gen/chat/v1;chatv1";
+
+// ChatService stores persistent, named conversations and their messages.
+// Each chat owns an ordered message log (user/assistant turns) that
+// survives service restarts and can be resumed across sessions.
+service ChatService {
+  // CreateChat creates a new named chat and returns it.
+  rpc CreateChat(CreateChatRequest) returns (CreateChatResponse);
+
+  // GetChat returns chat metadata without messages.
+  rpc GetChat(GetChatRequest) returns (GetChatResponse);
+
+  // ListChats returns all chats for a user, newest first.
+  rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
+
+  // DeleteChat permanently removes a chat and all its messages.
+  rpc DeleteChat(DeleteChatRequest) returns (DeleteChatResponse);
+
+  // AppendMessage adds a message to an existing chat.
+  rpc AppendMessage(AppendMessageRequest) returns (AppendMessageResponse);
+
+  // GetMessages returns all messages in a chat in creation order.
+  rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+}
+
+// --- Message Chat ---
+
+message Chat {
+  string chat_id        = 1;
+  string user_id        = 2;
+  string workspace_id   = 3; // "" = default workspace
+  string title          = 4; // human-readable name
+  int64  created_at     = 5; // unix millis
+  int64  last_message_at = 6; // unix millis, 0 if no messages yet
+}
+
+// --- Message Message ---
+
+message Message {
+  string message_id  = 1;
+  string chat_id     = 2;
+  string role        = 3; // "user" | "assistant"
+  string content     = 4;
+  int64  created_at  = 5; // unix millis
+}
+
+// --- Message CreateChatRequest ---
+
+message CreateChatRequest {
+  string user_id      = 1;
+  string workspace_id = 2;
+  string title        = 3; // optional; auto-generated if empty
+}
+
+message CreateChatResponse {
+  Chat chat = 1;
+}
+
+// --- Message GetChatRequest ---
+
+message GetChatRequest {
+  string chat_id = 1;
+  string user_id = 2; // for ownership check
+}
+
+message GetChatResponse {
+  Chat chat = 1;
+}
+
+// --- Message ListChatsRequest ---
+
+message ListChatsRequest {
+  string user_id      = 1;
+  string workspace_id = 2; // "" = all workspaces
+  int32  limit        = 3; // default 50
+}
+
+message ListChatsResponse {
+  repeated Chat chats = 1;
+}
+
+// --- Message DeleteChatRequest ---
+
+message DeleteChatRequest {
+  string chat_id = 1;
+  string user_id = 2; // for ownership check
+}
+
+message DeleteChatResponse {
+  bool deleted = 1;
+}
+
+// --- Message AppendMessageRequest ---
+
+message AppendMessageRequest {
+  string chat_id = 1;
+  string role    = 2; // "user" | "assistant"
+  string content = 3;
+}
+
+message AppendMessageResponse {
+  Message message = 1;
+}
+
+// --- Message GetMessagesRequest ---
+
+message GetMessagesRequest {
+  string chat_id = 1;
+  int32  limit   = 2; // default 100, most-recent N messages
+}
+
+message GetMessagesResponse {
+  repeated Message messages = 1;
+}
+

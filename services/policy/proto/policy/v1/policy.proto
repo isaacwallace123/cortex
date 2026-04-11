@@ -1,0 +1,84 @@
+﻿syntax = "proto3";
+
+package policy.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/policy/gen/policy/v1;policyv1";
+
+// PolicyService is the Aegis module â€” policy enforcement and approval management.
+service PolicyService {
+  // EvaluatePlan assesses each step of a plan and returns per-step verdicts.
+  rpc EvaluatePlan(EvaluatePlanRequest) returns (EvaluatePlanResponse);
+
+  // SubmitApproval resolves a pending approval (approve or deny).
+  rpc SubmitApproval(SubmitApprovalRequest) returns (SubmitApprovalResponse);
+
+  // ListPendingApprovals returns all unresolved approvals for a user.
+  rpc ListPendingApprovals(ListPendingApprovalsRequest) returns (ListPendingApprovalsResponse);
+}
+
+// --- Message EvaluatePlanRequest ---
+
+message EvaluatePlanRequest {
+  string            session_id = 1;
+  string            plan_id    = 2;
+  repeated PlanStep steps      = 3;
+  string            user_id    = 4; // authenticated caller
+  repeated string   roles      = 5; // caller's roles â€” used for role-based exemptions
+}
+
+message PlanStep {
+  int32  index       = 1;
+  string description = 2;
+  string executor    = 3;
+  string command     = 4;
+}
+
+message EvaluatePlanResponse {
+  repeated StepDecision decisions = 1;
+}
+
+message StepDecision {
+  int32  step_index   = 1;
+  string verdict      = 2; // "allow" | "deny" | "pending"
+  string reason       = 3;
+  string approval_id  = 4; // set when verdict == "pending"
+}
+
+// --- Message SubmitApprovalRequest ---
+
+message SubmitApprovalRequest {
+  string approval_id = 1;
+  string user_id     = 2;
+  string decision    = 3; // "approved" | "denied"
+}
+
+message SubmitApprovalResponse {
+  bool   ok      = 1;
+  string verdict = 2; // "approved" | "denied"
+}
+
+// --- Message ListPendingApprovalsRequest ---
+
+message ListPendingApprovalsRequest {
+  string user_id = 1; // filter by requester; empty = all (admin)
+}
+
+message Approval {
+  string approval_id  = 1;
+  string session_id   = 2;
+  string plan_id      = 3;
+  int32  step_index   = 4;
+  string description  = 5;
+  string executor     = 6;
+  string command      = 7;
+  string reason       = 8;
+  string user_id      = 9;
+  string status       = 10; // "pending" | "approved" | "denied"
+  int64  created_at   = 11;
+  int64  resolved_at  = 12; // 0 while pending
+}
+
+message ListPendingApprovalsResponse {
+  repeated Approval approvals = 1;
+}
+

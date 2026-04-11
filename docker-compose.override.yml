@@ -1,0 +1,15 @@
+# GPU override — apply when NVIDIA GPU is available.
+# Usage: docker compose up   (auto-merged with docker-compose.yml)
+# To disable: docker compose -f docker-compose.yml up
+
+name: cortex
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

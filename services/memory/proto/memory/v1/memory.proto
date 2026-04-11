@@ -1,0 +1,70 @@
+﻿syntax = "proto3";
+
+package memory.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/memory/gen/memory/v1;memoryv1";
+
+// MemoryService persists and retrieves session context for Cortex.
+// Brain writes events after each significant action and reads context
+// at the start of a session to restore continuity.
+service MemoryService {
+  // StoreEvent persists a named event with arbitrary payload for a session.
+  rpc StoreEvent(StoreEventRequest) returns (StoreEventResponse);
+
+  // GetSession returns all events stored for a session, in order.
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+
+  // ListPlans returns all plans created within a session.
+  rpc ListPlans(ListPlansRequest) returns (ListPlansResponse);
+}
+
+// --- Message StoreEventRequest ---
+
+message StoreEventRequest {
+  string session_id = 1;
+  string event_name = 2;  // e.g. "brain.input.parsed", "brain.plan.created"
+  string payload    = 3;  // JSON-encoded arbitrary data
+}
+
+message StoreEventResponse {
+  string event_id   = 1;
+  int64  stored_at  = 2;  // unix timestamp (seconds)
+}
+
+// --- Message GetSessionRequest ---
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  string         session_id = 1;
+  repeated Event events     = 2;
+}
+
+message Event {
+  string event_id   = 1;
+  string session_id = 2;
+  string event_name = 3;
+  string payload    = 4;
+  int64  stored_at  = 5;
+}
+
+// --- Message ListPlansRequest ---
+
+message ListPlansRequest {
+  string session_id = 1;
+}
+
+message ListPlansResponse {
+  repeated PlanSummary plans = 1;
+}
+
+message PlanSummary {
+  string plan_id    = 1;
+  string session_id = 2;
+  string intent     = 3;
+  int32  step_count = 4;
+  int64  created_at = 5;
+}
+

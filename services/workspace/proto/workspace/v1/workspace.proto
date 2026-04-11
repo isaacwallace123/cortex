@@ -1,0 +1,96 @@
+﻿syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/workspace/gen/workspace/v1;workspacev1";
+
+// WorkspaceService manages per-user isolated environments.
+// Each workspace has its own scoped memory, projects, chats, and execution root.
+service WorkspaceService {
+  // CreateWorkspace creates a new workspace for a user.
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+
+  // GetWorkspace returns a workspace by ID.
+  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+
+  // ListWorkspaces returns all workspaces for a user.
+  rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
+
+  // UpdateWorkspace updates a workspace's name or description.
+  rpc UpdateWorkspace(UpdateWorkspaceRequest) returns (UpdateWorkspaceResponse);
+
+  // DeleteWorkspace removes a workspace.
+  rpc DeleteWorkspace(DeleteWorkspaceRequest) returns (DeleteWorkspaceResponse);
+}
+
+// --- Message Workspace ---
+
+message Workspace {
+  string workspace_id = 1;
+  string user_id      = 2;
+  string name         = 3;
+  string description  = 4;
+  string root_path    = 5;  // absolute path for Forge scoping (may be empty)
+  int64  created_at   = 6;
+  int64  updated_at   = 7;
+}
+
+// --- Message CreateWorkspaceRequest ---
+
+message CreateWorkspaceRequest {
+  string user_id     = 1;
+  string name        = 2;
+  string description = 3;
+  string root_path   = 4;
+}
+
+message CreateWorkspaceResponse {
+  Workspace workspace = 1;
+}
+
+// --- Message GetWorkspaceRequest ---
+
+message GetWorkspaceRequest {
+  string workspace_id = 1;
+  string user_id      = 2;  // ensures ownership check
+}
+
+message GetWorkspaceResponse {
+  Workspace workspace = 1;
+}
+
+// --- Message ListWorkspacesRequest ---
+
+message ListWorkspacesRequest {
+  string user_id = 1;
+}
+
+message ListWorkspacesResponse {
+  repeated Workspace workspaces = 1;
+}
+
+// --- Message UpdateWorkspaceRequest ---
+
+message UpdateWorkspaceRequest {
+  string workspace_id = 1;
+  string user_id      = 2;
+  string name         = 3;
+  string description  = 4;
+  string root_path    = 5;
+}
+
+message UpdateWorkspaceResponse {
+  Workspace workspace = 1;
+}
+
+// --- Message DeleteWorkspaceRequest ---
+
+message DeleteWorkspaceRequest {
+  string workspace_id = 1;
+  string user_id      = 2;
+}
+
+message DeleteWorkspaceResponse {
+  bool deleted = 1;
+}
+

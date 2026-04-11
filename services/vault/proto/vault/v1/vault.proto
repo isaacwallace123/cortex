@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package vault.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/vault/gen/vault/v1;vaultv1";
+
+// VaultService is Cortex's long-term knowledge store.
+// Entries are full-text indexed (SQLite FTS5) and scoped by user + workspace.
+service VaultService {
+  // Store persists a knowledge entry. Returns the generated entry_id.
+  rpc Store(StoreRequest) returns (StoreResponse);
+
+  // Search performs a full-text query and returns the top matching entries.
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // Delete removes an entry by ID.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+message StoreRequest {
+  string          user_id      = 1;
+  string          workspace_id = 2; // "" = global scope for this user
+  string          content      = 3; // the knowledge to store (free-form text)
+  string          source       = 4; // e.g. "vector.execution", "user.note"
+  repeated string tags         = 5; // optional labels for filtering
+}
+
+message StoreResponse {
+  string entry_id   = 1;
+  int64  created_at = 2; // unix millis
+}
+
+message SearchRequest {
+  string user_id      = 1;
+  string workspace_id = 2; // "" = search across all workspaces for this user
+  string query        = 3;
+  int32  limit        = 4; // max results, default 5
+}
+
+message SearchResponse {
+  repeated Entry entries = 1;
+}
+
+message Entry {
+  string          entry_id     = 1;
+  string          user_id      = 2;
+  string          workspace_id = 3;
+  string          content      = 4;
+  string          source       = 5;
+  repeated string tags         = 6;
+  int64           created_at   = 7;
+}
+
+message DeleteRequest {
+  string entry_id = 1;
+  string user_id  = 2; // for ownership check
+}
+
+message DeleteResponse {
+  bool deleted = 1;
+}

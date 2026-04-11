@@ -1,0 +1,26 @@
+go 1.25.0
+
+use (
+	./apps/cli
+	./apps/relay
+	./pkg/observe
+	./services/api
+	./services/beacon
+	./services/arsenal
+	./services/atlas
+	./services/brain
+	./services/chat
+	./services/compass
+	./services/courier
+	./services/crucible
+	./services/forge
+	./services/inference
+	./services/memory
+	./services/nerva
+	./services/overwatch
+	./services/policy
+	./services/shell
+	./services/sovereign
+	./services/vault
+	./services/workspace
+)

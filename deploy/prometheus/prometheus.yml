@@ -1,0 +1,94 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: brain
+    static_configs:
+      - targets: ['brain:8080']
+    metrics_path: /metrics
+
+  - job_name: inference
+    static_configs:
+      - targets: ['inference:9091']
+    metrics_path: /metrics
+
+  - job_name: memory
+    static_configs:
+      - targets: ['memory:7071']
+    metrics_path: /metrics
+
+  - job_name: shell
+    static_configs:
+      - targets: ['shell:4041']
+    metrics_path: /metrics
+
+  - job_name: forge
+    static_configs:
+      - targets: ['forge:5051']
+    metrics_path: /metrics
+
+  - job_name: nerva
+    static_configs:
+      - targets: ['nerva:3031']
+    metrics_path: /metrics
+
+  - job_name: policy
+    static_configs:
+      - targets: ['policy:6061']
+    metrics_path: /metrics
+
+  - job_name: atlas
+    static_configs:
+      - targets: ['atlas:6162']
+    metrics_path: /metrics
+
+  - job_name: crucible
+    static_configs:
+      - targets: ['crucible:7273']
+    metrics_path: /metrics
+
+  - job_name: chat
+    static_configs:
+      - targets: ['chat:9192']
+    metrics_path: /metrics
+
+  - job_name: vault
+    static_configs:
+      - targets: ['vault:8182']
+    metrics_path: /metrics
+
+  - job_name: compass
+    static_configs:
+      - targets: ['compass:5152']
+    metrics_path: /metrics
+
+  - job_name: sovereign
+    static_configs:
+      - targets: ['sovereign:4142']
+    metrics_path: /metrics
+
+  - job_name: workspace
+    static_configs:
+      - targets: ['workspace:6263']
+    metrics_path: /metrics
+
+  - job_name: arsenal
+    static_configs:
+      - targets: ['arsenal:7374']
+    metrics_path: /metrics
+
+  - job_name: beacon
+    static_configs:
+      - targets: ['beacon:5253']
+    metrics_path: /metrics
+
+  - job_name: courier
+    static_configs:
+      - targets: ['courier:2021']
+    metrics_path: /metrics
+
+  - job_name: overwatch
+    static_configs:
+      - targets: ['overwatch:8484']
+    metrics_path: /metrics

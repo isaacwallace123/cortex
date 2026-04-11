@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package atlas.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/atlas/gen/atlas/v1;atlasv1";
+
+// AtlasService executes kubectl commands against a configured Kubernetes cluster.
+// Atlas is Cortex's cluster management executor — it validates, runs, and returns
+// structured output from any kubectl command.
+service AtlasService {
+  // Execute runs a kubectl command and returns structured output.
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+
+  // ClusterInfo returns the current context and cluster details.
+  rpc ClusterInfo(ClusterInfoRequest) returns (ClusterInfoResponse);
+}
+
+message ExecuteRequest {
+  string command      = 1; // kubectl subcommand + args, e.g. "get pods -n default"
+  int32  timeout_secs = 2; // default 30
+}
+
+message ExecuteResponse {
+  string stdout      = 1;
+  string stderr      = 2;
+  int32  exit_code   = 3;
+  int64  duration_ms = 4;
+}
+
+message ClusterInfoRequest {}
+
+message ClusterInfoResponse {
+  string context        = 1; // current kubeconfig context name
+  string server         = 2; // API server URL
+  bool   reachable      = 3; // whether the cluster responded to a health check
+}

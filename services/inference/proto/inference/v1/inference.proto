@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package inference.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/inference/gen/inference/v1;inferencev1";
+
+// InferenceService is the LLM access abstraction for Cortex.
+// Brain (and any other service) calls this to get model completions.
+// It never performs planning, memory, or tool execution.
+service InferenceService {
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+  // CompleteStream streams generated tokens as they arrive from the provider.
+  // The final chunk has done=true and carries token counts.
+  rpc CompleteStream(CompleteRequest) returns (stream CompleteChunk);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+}
+
+message CompleteRequest {
+  string model  = 1;  // model name, e.g. "llama3.2"
+  string prompt = 2;
+  // Optional generation parameters
+  float  temperature = 3;
+  int32  max_tokens  = 4;
+}
+
+message CompleteResponse {
+  string text         = 1;  // generated text
+  string model        = 2;  // model actually used
+  int32  input_tokens = 3;
+  int32  output_tokens = 4;
+}
+
+// CompleteChunk is a single streamed token from CompleteStream.
+message CompleteChunk {
+  string token         = 1;  // next generated token (empty on the final chunk)
+  bool   done          = 2;  // true on the last chunk only
+  string model         = 3;  // set on the final chunk
+  int32  input_tokens  = 4;  // set on the final chunk
+  int32  output_tokens = 5;  // set on the final chunk
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated Model models = 1;
+}
+
+message Model {
+  string name       = 1;
+  string size       = 2;
+  string modified   = 3;
+}

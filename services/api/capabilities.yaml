@@ -1,0 +1,27 @@
+service: api
+version: "0.1.0"
+description: |
+  API is the external-facing gateway for Cortex.
+  It exposes a public HTTP/JSON API and translates requests into internal gRPC calls.
+  No domain logic lives here — only protocol translation, request enrichment, and error normalization.
+
+capabilities:
+  - chat    # parse input + create plan in one call → structured response
+
+transport:
+  http:
+    addr_env: API_ADDR
+    default: ":8000"
+    endpoints:
+      - POST /v1/chat
+      - GET  /healthz
+
+ports:
+  calls:
+    - brain   # via gRPC
+
+configuration:
+  API_ADDR:        HTTP listen address (default: :8000)
+  BRAIN_GRPC_ADDR: brain service gRPC address (default: localhost:8090)
+
+milestone: 4

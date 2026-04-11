@@ -1,0 +1,213 @@
+﻿syntax = "proto3";
+
+package compass.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/compass/gen/compass/v1;compassv1";
+
+// CompassService manages projects, milestones, tasks, and architectural decisions.
+service CompassService {
+  // --- RPC CreateProject ---
+  rpc CreateProject(CreateProjectRequest)       returns (CreateProjectResponse);
+  rpc GetProject(GetProjectRequest)             returns (GetProjectResponse);
+  rpc ListProjects(ListProjectsRequest)         returns (ListProjectsResponse);
+  rpc UpdateProjectStatus(UpdateProjectStatusRequest) returns (UpdateProjectStatusResponse);
+
+  // --- RPC CreateMilestone ---
+  rpc CreateMilestone(CreateMilestoneRequest)         returns (CreateMilestoneResponse);
+  rpc ListMilestones(ListMilestonesRequest)           returns (ListMilestonesResponse);
+  rpc UpdateMilestoneStatus(UpdateMilestoneStatusRequest) returns (UpdateMilestoneStatusResponse);
+
+  // --- RPC CreateTask ---
+  rpc CreateTask(CreateTaskRequest)           returns (CreateTaskResponse);
+  rpc ListTasks(ListTasksRequest)             returns (ListTasksResponse);
+  rpc UpdateTaskStatus(UpdateTaskStatusRequest) returns (UpdateTaskStatusResponse);
+
+  // --- RPC AddDecision ---
+  rpc AddDecision(AddDecisionRequest)     returns (AddDecisionResponse);
+  rpc ListDecisions(ListDecisionsRequest) returns (ListDecisionsResponse);
+}
+
+// --- Enum ProjectStatus ---
+
+enum ProjectStatus {
+  PROJECT_STATUS_UNSPECIFIED = 0;
+  PROJECT_STATUS_PLANNING    = 1;
+  PROJECT_STATUS_ACTIVE      = 2;
+  PROJECT_STATUS_PAUSED      = 3;
+  PROJECT_STATUS_COMPLETED   = 4;
+}
+
+enum MilestoneStatus {
+  MILESTONE_STATUS_UNSPECIFIED = 0;
+  MILESTONE_STATUS_PENDING     = 1;
+  MILESTONE_STATUS_IN_PROGRESS = 2;
+  MILESTONE_STATUS_COMPLETED   = 3;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_TODO        = 1;
+  TASK_STATUS_IN_PROGRESS = 2;
+  TASK_STATUS_DONE        = 3;
+  TASK_STATUS_BLOCKED     = 4;
+}
+
+// --- Message Project ---
+
+message Project {
+  string        project_id   = 1;
+  string        name         = 2;
+  string        description  = 3;
+  ProjectStatus status       = 4;
+  int64         created_at   = 5; // unix millis
+  int64         updated_at   = 6;
+}
+
+message Milestone {
+  string          milestone_id = 1;
+  string          project_id   = 2;
+  string          name         = 3;
+  string          description  = 4;
+  MilestoneStatus status       = 5;
+  int32           order        = 6;
+}
+
+message Task {
+  string     task_id      = 1;
+  string     milestone_id = 2;
+  string     name         = 3;
+  string     description  = 4;
+  TaskStatus status       = 5;
+  repeated string acceptance_criteria = 6;
+  int64      created_at   = 7; // unix millis
+  int64      completed_at = 8; // unix millis; 0 if not completed
+}
+
+message Decision {
+  string   decision_id  = 1;
+  string   project_id   = 2;
+  string   title        = 3;
+  string   rationale    = 4;
+  repeated string alternatives = 5;
+  int64    decided_at   = 6; // unix millis
+}
+
+// --- Message CreateProjectRequest ---
+
+message CreateProjectRequest {
+  string name        = 1;
+  string description = 2;
+}
+
+message CreateProjectResponse {
+  Project project = 1;
+}
+
+message GetProjectRequest {
+  string project_id = 1;
+}
+
+message GetProjectResponse {
+  Project             project    = 1;
+  repeated Milestone  milestones = 2;
+  repeated Task       tasks      = 3;
+}
+
+message ListProjectsRequest {
+  ProjectStatus status_filter = 1; // 0 = all
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+}
+
+message UpdateProjectStatusRequest {
+  string        project_id = 1;
+  ProjectStatus status     = 2;
+}
+
+message UpdateProjectStatusResponse {
+  Project project = 1;
+}
+
+// --- Message CreateMilestoneRequest ---
+
+message CreateMilestoneRequest {
+  string project_id  = 1;
+  string name        = 2;
+  string description = 3;
+  int32  order       = 4;
+}
+
+message CreateMilestoneResponse {
+  Milestone milestone = 1;
+}
+
+message ListMilestonesRequest {
+  string project_id = 1;
+}
+
+message ListMilestonesResponse {
+  repeated Milestone milestones = 1;
+}
+
+message UpdateMilestoneStatusRequest {
+  string          milestone_id = 1;
+  MilestoneStatus status       = 2;
+}
+
+message UpdateMilestoneStatusResponse {
+  Milestone milestone = 1;
+}
+
+// --- Message CreateTaskRequest ---
+
+message CreateTaskRequest {
+  string          milestone_id         = 1;
+  string          name                 = 2;
+  string          description          = 3;
+  repeated string acceptance_criteria  = 4;
+}
+
+message CreateTaskResponse {
+  Task task = 1;
+}
+
+message ListTasksRequest {
+  string milestone_id = 1;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+}
+
+message UpdateTaskStatusRequest {
+  string     task_id = 1;
+  TaskStatus status  = 2;
+}
+
+message UpdateTaskStatusResponse {
+  Task task = 1;
+}
+
+// --- Message AddDecisionRequest ---
+
+message AddDecisionRequest {
+  string          project_id   = 1;
+  string          title        = 2;
+  string          rationale    = 3;
+  repeated string alternatives = 4;
+}
+
+message AddDecisionResponse {
+  Decision decision = 1;
+}
+
+message ListDecisionsRequest {
+  string project_id = 1;
+}
+
+message ListDecisionsResponse {
+  repeated Decision decisions = 1;
+}
+

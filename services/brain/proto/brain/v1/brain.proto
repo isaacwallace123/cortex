@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package brain.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/brain/gen/brain/v1;brainv1";
+
+// BrainService is the core orchestration interface for Cortex.
+service BrainService {
+  rpc ParseInput(ParseInputRequest)     returns (ParseInputResponse);
+  rpc CreatePlan(CreatePlanRequest)     returns (CreatePlanResponse);
+  rpc ExecutePlan(ExecutePlanRequest)   returns (ExecutePlanResponse);
+  rpc GetSession(GetSessionRequest)     returns (GetSessionResponse);
+  // StreamChat is a single-shot streaming RPC: parse + plan + execute, streaming
+  // tokens back as they are produced by the inference service. Only conversation
+  // and direct_answer modes produce token-by-token output; execution mode emits
+  // a single token containing the final stdout of the plan.
+  rpc StreamChat(StreamChatRequest)     returns (stream ChatToken);
+}
+
+message ParseInputRequest {
+  string session_id = 1;
+  string raw_input  = 2;
+}
+
+message ParseInputResponse {
+  string          session_id = 1;
+  string          intent     = 2;
+  repeated string entities   = 3;
+  // mode is Prism's routing classification: "direct_answer" | "execution" | "clarification"
+  string          mode       = 4;
+  // raw_input is forwarded so Axiom can use the original question for direct answers.
+  string          raw_input  = 5;
+}
+
+message CreatePlanRequest {
+  string          session_id = 1;
+  string          intent     = 2;
+  repeated string entities   = 3;
+  // mode is forwarded from ParseInputResponse so Axiom can route correctly.
+  string          mode       = 4;
+  // raw_input carries the original user question so Axiom can use it verbatim
+  // for direct_answer infer steps instead of the abbreviated intent phrase.
+  string          raw_input  = 5;
+}
+
+message CreatePlanResponse {
+  string        session_id = 1;
+  string        plan_id    = 2;
+  repeated Step steps      = 3;
+}
+
+message Step {
+  int32  index       = 1;
+  string description = 2;
+  string executor    = 3;
+  string verdict     = 4; // "allow" | "deny" | "pending" — Aegis policy decision
+  string command     = 5; // concrete shell command, set by Axiom for shell steps
+  string agent_id    = 6; // for executor:courier — device_name or agent_id of the target agent
+  string approval_id = 7; // set when verdict=="pending"; references the Aegis approval record
+}
+
+message ExecutePlanRequest {
+  string          session_id = 1;
+  string          plan_id    = 2;
+  repeated Step   steps      = 3;
+}
+
+message StepResult {
+  int32  step_index  = 1;
+  string stdout      = 2;
+  string stderr      = 3;
+  int32  exit_code   = 4;
+  int64  duration_ms = 5;
+  bool   skipped     = 6;
+  string skip_reason = 7;
+}
+
+message ExecutePlanResponse {
+  string              session_id = 1;
+  string              plan_id    = 2;
+  repeated StepResult results    = 3;
+}
+
+message StreamChatRequest {
+  string session_id = 1;
+  string raw_input  = 2;
+  string user_id    = 3;
+}
+
+message ChatToken {
+  string token   = 1; // partial token from the LLM
+  bool   done    = 2; // true on the final message
+  string plan_id = 3; // set only on the final (done) message
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  string          session_id = 1;
+  repeated Event  events     = 2;
+}
+
+message Event {
+  string event_id   = 1;
+  string event_name = 2;
+  string payload    = 3;
+  int64  stored_at  = 4;
+}

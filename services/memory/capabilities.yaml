@@ -1,0 +1,26 @@
+service: memory
+version: "0.1.0"
+description: |
+  Memory is the session persistence layer for Cortex.
+  It stores the event stream for every session so brain can restore
+  context across requests and provide continuity to users.
+
+capabilities:
+  - store_event   # persist a named event with payload for a session
+  - get_session   # retrieve all events for a session in order
+  - list_plans    # retrieve plan summaries for a session
+
+storage:
+  sqlite:
+    status: implemented
+    path_env: MEMORY_DB_PATH
+    default: /data/memory.db
+  postgresql:
+    status: planned
+
+transport:
+  grpc:
+    addr_env: MEMORY_ADDR
+    default: ":7070"
+
+milestone: 5

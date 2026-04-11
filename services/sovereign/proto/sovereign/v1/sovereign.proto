@@ -1,0 +1,120 @@
+﻿syntax = "proto3";
+
+package sovereign.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/sovereign/gen/sovereign/v1;sovereignv1";
+
+// SovereignService handles user identity, authentication, and session management.
+service SovereignService {
+  // Register creates a new user account and returns a session token.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Login authenticates a user and returns a session token.
+  rpc Login(LoginRequest) returns (LoginResponse);
+
+  // ValidateToken checks a bearer token and returns the associated identity.
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+
+  // Logout invalidates a session token.
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+
+  // GetUser returns a user profile by ID.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // ListUsers returns all users (admin only at the service level).
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}
+
+// --- Message User ---
+
+message User {
+  string          user_id     = 1;
+  string          username    = 2;
+  string          email       = 3;
+  repeated string roles       = 4; // "admin" | "user" | "restricted"
+  int64           created_at  = 5; // unix millis
+  int64           last_active = 6; // unix millis
+}
+
+message Session {
+  string session_id   = 1;
+  string user_id      = 2;
+  string device_id    = 3;
+  string device_name  = 4;
+  string token        = 5; // opaque bearer token
+  int64  expires_at   = 6; // unix millis
+  int64  created_at   = 7; // unix millis
+}
+
+// --- Message RegisterRequest ---
+
+message RegisterRequest {
+  string username    = 1;
+  string email       = 2;
+  string password    = 3;
+  string role        = 4; // optional; defaults to "user"
+  string device_id   = 5; // optional device fingerprint
+  string device_name = 6; // optional device label
+}
+
+message RegisterResponse {
+  User    user    = 1;
+  Session session = 2;
+}
+
+// --- Message LoginRequest ---
+
+message LoginRequest {
+  string username    = 1;
+  string password    = 2;
+  string device_id   = 3;
+  string device_name = 4;
+}
+
+message LoginResponse {
+  User    user    = 1;
+  Session session = 2;
+}
+
+// --- Message ValidateTokenRequest ---
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool            valid    = 1;
+  string          user_id  = 2;
+  string          username = 3;
+  repeated string roles    = 4;
+  string          reason   = 5; // set when valid=false
+}
+
+// --- Message LogoutRequest ---
+
+message LogoutRequest {
+  string token = 1;
+}
+
+message LogoutResponse {
+  bool revoked = 1;
+}
+
+// --- Message GetUserRequest ---
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+// --- Message ListUsersRequest ---
+
+message ListUsersRequest {}
+
+message ListUsersResponse {
+  repeated User users = 1;
+}
+

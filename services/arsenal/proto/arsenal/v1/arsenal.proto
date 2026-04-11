@@ -1,0 +1,71 @@
+﻿syntax = "proto3";
+
+package arsenal.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/arsenal/gen/arsenal/v1;arsenalv1";
+
+// ArsenalService is the tool registry â€” a central catalog of every capability
+// that Cortex can invoke. Brain queries the registry at plan time to build its
+// executor table dynamically instead of relying on hardcoded lists.
+service ArsenalService {
+  // RegisterTool adds or updates a tool definition in the registry.
+  rpc RegisterTool(RegisterToolRequest) returns (RegisterToolResponse);
+
+  // GetTool returns a single tool by name.
+  rpc GetTool(GetToolRequest) returns (GetToolResponse);
+
+  // ListTools returns all enabled tools, optionally filtered by executor or tag.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+
+  // DeleteTool removes a tool from the registry by name.
+  rpc DeleteTool(DeleteToolRequest) returns (DeleteToolResponse);
+}
+
+// --- Message Tool ---
+
+message Tool {
+  string   name         = 1; // unique identifier, e.g. "run_command"
+  string   description  = 2; // human-readable explanation
+  string   executor     = 3; // "shell" | "filesystem" | "infer" | "crucible" | "atlas" | "courier"
+  string   example      = 4; // example STEP line for the Axiom planning prompt
+  string   safety_level = 5; // "safe" | "moderate" | "dangerous"
+  repeated string tags  = 6; // grouping labels, e.g. ["local", "k8s"]
+  bool     enabled      = 7; // false = invisible to planners
+  string   version      = 8; // semver
+}
+
+// --- Message RegisterToolRequest ---
+
+message RegisterToolRequest {
+  Tool tool = 1;
+}
+
+message RegisterToolResponse {
+  Tool tool = 1;
+}
+
+message GetToolRequest {
+  string name = 1;
+}
+
+message GetToolResponse {
+  Tool tool = 1;
+}
+
+message ListToolsRequest {
+  string executor = 1; // optional filter by executor type
+  string tag      = 2; // optional filter by tag
+}
+
+message ListToolsResponse {
+  repeated Tool tools = 1;
+}
+
+message DeleteToolRequest {
+  string name = 1;
+}
+
+message DeleteToolResponse {
+  bool deleted = 1;
+}
+

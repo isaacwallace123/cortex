@@ -1,0 +1,120 @@
+﻿syntax = "proto3";
+
+package courier.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/courier/gen/courier/v1;courierv1";
+
+// CourierService manages persistent agent connections and remote task dispatch.
+// Agents (Relay or Halo Edge) initiate a bidirectional stream via Connect; Core
+// uses Dispatch to route execution to a specific connected agent.
+service CourierService {
+  // Connect opens a persistent bidirectional stream between an agent and Core.
+  // The agent initiates and holds the connection (NAT-friendly). Core pushes
+  // task assignments down the stream; the agent pushes results back up.
+  rpc Connect(stream AgentMessage) returns (stream CoreMessage);
+
+  // ListAgents returns all currently connected agents.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+
+  // Dispatch sends a shell command to a specific connected agent and waits for the result.
+  rpc Dispatch(DispatchRequest) returns (DispatchResponse);
+}
+
+// --- Message AgentMessage ---
+
+message AgentMessage {
+  oneof payload {
+    RegisterRequest register    = 1;
+    Heartbeat       heartbeat   = 2;
+    TaskResult      task_result = 3;
+  }
+}
+
+message RegisterRequest {
+  string agent_id    = 1; // persistent UUID, generated on first boot
+  string agent_type  = 2; // "relay" | "halo_edge"
+  string version     = 3; // semver
+  string device_id   = 4; // hardware-derived or generated UUID
+  string device_name = 5; // human-readable, e.g. "prod-node-03"
+  string hostname    = 6;
+  string os          = 7; // "linux" | "darwin" | "windows"
+  string arch        = 8; // "amd64" | "arm64"
+  repeated string capabilities = 9;  // "terminal", "filesystem", "docker", ...
+  repeated string local_ips    = 10;
+}
+
+message Heartbeat {
+  string agent_id       = 1;
+  float  cpu_percent    = 2;
+  float  memory_percent = 3;
+  float  disk_percent   = 4;
+}
+
+message TaskResult {
+  string task_id     = 1;
+  string stdout      = 2;
+  string stderr      = 3;
+  int32  exit_code   = 4;
+  int64  duration_ms = 5;
+}
+
+// --- Message CoreMessage ---
+
+message CoreMessage {
+  oneof payload {
+    RegisterAck    register_ack    = 1;
+    TaskAssignment task_assignment = 2;
+    Ping           ping            = 3;
+  }
+}
+
+message RegisterAck {
+  string agent_id = 1;
+  bool   accepted = 2;
+  string message  = 3; // optional rejection reason
+}
+
+message TaskAssignment {
+  string task_id    = 1;
+  string command    = 2; // shell command to execute
+  int64  timeout_ms = 3; // 0 = use agent default (30s)
+}
+
+message Ping {
+  int64 timestamp = 1;
+}
+
+// --- Message ListAgentsRequest ---
+
+message ListAgentsRequest {}
+
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+
+message AgentInfo {
+  string          agent_id     = 1;
+  string          agent_type   = 2;
+  string          device_name  = 3;
+  string          hostname     = 4;
+  string          os           = 5;
+  string          arch         = 6;
+  repeated string capabilities = 7;
+  string          status       = 8; // "online" | "degraded"
+  int64           connected_at = 9;
+  int64           last_seen    = 10;
+}
+
+message DispatchRequest {
+  string agent_id   = 1; // target agent_id
+  string command    = 2; // shell command to execute
+  int64  timeout_ms = 3; // 0 = 30s default
+}
+
+message DispatchResponse {
+  string stdout      = 1;
+  string stderr      = 2;
+  int32  exit_code   = 3;
+  int64  duration_ms = 4;
+}
+

@@ -1,0 +1,30 @@
+service: inference
+version: "0.1.0"
+description: |
+  Inference is the LLM access abstraction for Cortex.
+  It abstracts model providers (Ollama, vLLM) behind a clean gRPC interface.
+  It must never perform planning, memory access, or tool execution.
+
+capabilities:
+  - complete       # send a prompt, get generated text
+  - list_models    # enumerate available models from the provider
+
+providers:
+  ollama:
+    status: implemented
+    url_env: OLLAMA_URL
+    default: "http://localhost:11434"
+  vllm:
+    status: planned
+
+transport:
+  grpc:
+    addr_env: INFERENCE_ADDR
+    default: ":9090"
+
+configuration:
+  OLLAMA_URL:               Ollama base URL
+  INFERENCE_ADDR:           gRPC listen address
+  INFERENCE_DEFAULT_MODEL:  model to use when none is specified (default: llama3.2)
+
+milestone: 2

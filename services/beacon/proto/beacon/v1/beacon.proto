@@ -1,0 +1,48 @@
+﻿syntax = "proto3";
+
+package beacon.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/beacon/gen/beacon/v1;beaconv1";
+
+// BeaconService is the Cortex internet-access module.
+// It exposes web search and HTTP fetch capabilities to Brain.
+service BeaconService {
+  // Search queries the configured search backend and returns ranked results.
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // Fetch retrieves the content of a URL and returns extracted text.
+  rpc Fetch(FetchRequest) returns (FetchResponse);
+}
+
+// --- Message SearchRequest ---
+
+message SearchRequest {
+  string query       = 1;
+  int32  max_results = 2; // default 5 when 0
+}
+
+message SearchResult {
+  string title   = 1;
+  string url     = 2;
+  string snippet = 3;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+  string                engine  = 2; // which backend served the query
+}
+
+// --- Message FetchRequest ---
+
+message FetchRequest {
+  string url             = 1;
+  int32  timeout_seconds = 2; // 0 = use service default (15 s)
+}
+
+message FetchResponse {
+  int32  status_code   = 1;
+  string content_type  = 2;
+  string body          = 3; // text content, capped at 100 KB
+  string error         = 4; // non-empty on transport or parse error
+}
+
