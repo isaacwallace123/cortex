@@ -9,6 +9,7 @@ on:
       - 'pkg/**'
       - '*.work'
       - '*.work.sum'
+      - '.github/workflows/docker-publish.yml'
 
 jobs:
   build:
