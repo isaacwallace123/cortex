@@ -7,7 +7,7 @@ image:
 
 # ── Node selector ─────────────────────────────────────────────────────────────
 nodeSelector:
-  node-role.kubernetes.io/apps: "true"
+  node-role.kubernetes.io/ai: "true"
 
 # ── Default resource requests/limits for all Go services ─────────────────────
 defaultResources:
