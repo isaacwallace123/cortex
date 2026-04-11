@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package genesis.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/genesis/gen/genesis/v1;genesisv1";
+
+// GenesisService is the tool auto-generation pipeline.
+// Given a natural language description, it uses the inference service to
+// draft a tool definition conforming to the Arsenal schema, then registers
+// the tool in Arsenal automatically.
+service GenesisService {
+  // GenerateTool accepts a description and generates + registers a new tool.
+  // On success the registered Tool is returned.
+  rpc GenerateTool(GenerateToolRequest) returns (GenerateToolResponse);
+
+  // ListProposals returns previously generated tools (newest first).
+  rpc ListProposals(ListProposalsRequest) returns (ListProposalsResponse);
+}
+
+// GeneratedTool mirrors the Arsenal Tool message.
+message GeneratedTool {
+  string          name         = 1;
+  string          description  = 2;
+  string          executor     = 3;
+  string          example      = 4;
+  string          safety_level = 5;
+  repeated string tags         = 6;
+  string          version      = 7;
+}
+
+// Proposal is a persisted record of a generation request and its outcome.
+message Proposal {
+  string        proposal_id  = 1;
+  string        description  = 2; // original natural language request
+  GeneratedTool tool         = 3; // generated tool (may be nil on failure)
+  bool          registered   = 4; // true if tool was successfully registered in Arsenal
+  string        error        = 5; // non-empty if generation or registration failed
+  int64         created_at   = 6;
+}
+
+message GenerateToolRequest {
+  // description is the natural language specification of the new tool.
+  // Example: "A tool that runs docker ps and returns the list of running containers."
+  string description = 1;
+}
+
+message GenerateToolResponse {
+  Proposal proposal = 1;
+}
+
+message ListProposalsRequest {}
+
+message ListProposalsResponse {
+  repeated Proposal proposals = 1;
+}

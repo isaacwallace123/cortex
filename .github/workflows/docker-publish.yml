@@ -1,0 +1,99 @@
+name: Build & Publish Docker Images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'services/**'
+      - 'pkg/**'
+      - '*.work'
+      - '*.work.sum'
+
+jobs:
+  build:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api
+          - arsenal
+          - atlas
+          - beacon
+          - brain
+          - catalyst
+          - chat
+          - compass
+          - courier
+          - crucible
+          - forge
+          - genesis
+          - inference
+          - memory
+          - nerva
+          - overwatch
+          - policy
+          - shell
+          - sovereign
+          - vault
+          - workspace
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ghcr.io/isaacwallace123/cortex-${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/isaacwallace123/cortex-${{ matrix.service }}:latest
+            ghcr.io/isaacwallace123/cortex-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # After all images are built, stamp the git SHA into values.yaml so ArgoCD
+  # detects the change and triggers a sync — no image-updater needed.
+  update-chart:
+    name: Update Helm chart image tag
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Use a PAT or the default token; push requires write permission.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stamp image tag in values.yaml
+        run: |
+          sed -i "s|^  tag: .*|  tag: ${{ github.sha }}|" deploy/helm/cortex/values.yaml
+
+      - name: Commit updated values.yaml
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/helm/cortex/values.yaml
+          git commit -m "chore: bump image tag to ${{ github.sha }}" || echo "Nothing to commit"
+          git push

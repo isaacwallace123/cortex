@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	cortexlog "github.com/isaacwallace123/cortex/services/brain/internal/log"
+	"github.com/isaacwallace123/cortex/services/brain/internal/domain"
 	"github.com/isaacwallace123/cortex/services/brain/internal/ports"
 )
 
@@ -80,7 +81,7 @@ func (uc *StreamChatUseCase) Stream(ctx context.Context, sessionID, rawInput str
 				}
 			}
 
-			ch, err := uc.inference.CompleteStream(ctx, prompt)
+			ch, err := uc.inference.CompleteStream(ctx, prompt, 0.7)
 			if err != nil {
 				select {
 				case out <- StreamChatToken{Token: fmt.Sprintf("Error: %v", err), Done: true, PlanID: planned.Plan.ID}:
@@ -106,22 +107,14 @@ func (uc *StreamChatUseCase) Stream(ctx context.Context, sessionID, rawInput str
 			return
 		}
 
-		// Execution mode: run the plan, collect stdout, emit as single token.
+		// Execution / tool_assisted mode: run the plan, collect results.
 		execOut, err := uc.executePlan.Execute(ctx, ExecutePlanInput{
 			SessionID: planned.Plan.SessionID,
 			PlanID:    planned.Plan.ID,
 			Steps:     planned.Plan.Steps,
 		})
 
-		answer := ""
-		if err == nil {
-			for _, r := range execOut.Results {
-				if r.Stdout != "" {
-					answer = r.Stdout
-					break
-				}
-			}
-		}
+		answer := collectAnswer(execOut, err, planned.Plan.Steps)
 
 		if answer != "" {
 			select {
@@ -137,4 +130,54 @@ func (uc *StreamChatUseCase) Stream(ctx context.Context, sessionID, rawInput str
 	}()
 
 	return out, nil
+}
+
+// collectAnswer extracts the best human-readable answer from plan execution results.
+// Priority order:
+//  1. Last infer step stdout — the LLM's analysis of tool outputs (best for tool_assisted)
+//  2. Last non-empty stdout from any step — raw command output
+//  3. A generic confirmation when steps ran but produced no output (e.g. file writes)
+func collectAnswer(execOut ExecutePlanOutput, execErr error, steps []domain.Step) string {
+	if execErr != nil {
+		return fmt.Sprintf("Error running plan: %v", execErr)
+	}
+
+	// Build a map from step index to result for fast lookup.
+	resultByIndex := make(map[int]domain.ExecutionResult, len(execOut.Results))
+	for _, r := range execOut.Results {
+		resultByIndex[r.StepIndex] = r
+	}
+
+	// 1. Look for the last infer step with a non-empty answer.
+	for i := len(steps) - 1; i >= 0; i-- {
+		s := steps[i]
+		if s.Executor != "infer" {
+			continue
+		}
+		if r, ok := resultByIndex[s.Index]; ok && r.Stdout != "" {
+			return r.Stdout
+		}
+	}
+
+	// 2. Last non-empty stdout from any step.
+	for i := len(execOut.Results) - 1; i >= 0; i-- {
+		if execOut.Results[i].Stdout != "" {
+			return execOut.Results[i].Stdout
+		}
+	}
+
+	// 3. Generic confirmation — plan ran but produced no printable output.
+	if len(execOut.Results) > 0 {
+		allSkipped := true
+		for _, r := range execOut.Results {
+			if !r.Skipped {
+				allSkipped = false
+				break
+			}
+		}
+		if !allSkipped {
+			return "Done."
+		}
+	}
+	return ""
 }

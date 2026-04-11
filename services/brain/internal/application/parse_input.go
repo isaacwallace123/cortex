@@ -51,7 +51,7 @@ func (uc *ParseInputUseCase) Execute(ctx context.Context, in ParseInputInput) (P
 		slog.Int("input_len", len(in.RawInput)),
 	)
 
-	response, err := uc.inference.Complete(ctx, buildParsePrompt(in.RawInput))
+	response, err := uc.inference.Complete(ctx, buildParsePrompt(in.RawInput), 0.1)
 	if err != nil {
 		return ParseInputOutput{}, fmt.Errorf("inference failed during parse_input: %w", err)
 	}
@@ -85,23 +85,34 @@ func (uc *ParseInputUseCase) Execute(ctx context.Context, in ParseInputInput) (P
 }
 
 func buildParsePrompt(rawInput string) string {
-	return fmt.Sprintf(`Classify this user input and extract its intent and entities.
+	return fmt.Sprintf(`You are a strict intent classifier. Analyze the user message below and output ONLY the three lines shown. No preamble, no explanation, no extra text.
 
-Respond in exactly this format (no extra text):
-INTENT: <short intent phrase>
-ENTITIES: <comma-separated list, or NONE>
-MODE: <conversation|direct_answer|execution|tool_assisted|clarification>
+OUTPUT FORMAT (copy exactly, fill in the blanks):
+INTENT: <short phrase describing what the user wants>
+ENTITIES: <comma-separated nouns/names/values, or NONE>
+MODE: <one of: conversation|direct_answer|execution|tool_assisted|clarification>
 
-MODE rules:
-- conversation: open-ended discussion, opinions, brainstorming, abstract topics, creative thinking, or anything where a back-and-forth exchange is expected (e.g. "what do you think about microservices?", "help me brainstorm names for my project", "tell me about yourself", "how does gRPC work?")
-- direct_answer: a specific factual question with a single definite answer, requiring no system commands (e.g. "what is the capital of France?", "what year was Docker released?")
-- execution: requires running shell or filesystem commands where the output itself is the answer (e.g. "check disk usage", "list files", "show processes", "create a directory")
-- tool_assisted: requires running commands AND then reasoning about or analyzing the results (e.g. "check disk usage and tell me what's using the most space", "show running processes and suggest what to kill")
-- clarification: too ambiguous to classify without more context (e.g. "do the thing", "fix it")
+MODE DEFINITIONS — pick the FIRST that matches:
+  conversation   — greetings, chat, opinions, creative ideas, brainstorming, open-ended questions, "how does X work", "tell me about Y"
+  direct_answer  — a closed factual question answerable from knowledge alone, no tools needed ("what is the capital of France?", "who invented TCP/IP?")
+  execution      — user wants something DONE on the system: create/delete/move files, run commands, write code to disk ("create a file", "delete logs", "list running processes")
+  tool_assisted  — requires searching the web OR running commands AND then explaining results ("look up X and write it to a file", "check disk usage and summarize", "research X")
+  clarification  — genuinely too ambiguous to classify ("do the thing", "fix it", single words)
 
-When in doubt between conversation and direct_answer, choose conversation.
+EXAMPLES:
+  "hi there"                                                → MODE: conversation
+  "what do you think about microservices?"                  → MODE: conversation
+  "tell me a joke"                                          → MODE: conversation
+  "what is 2 + 2?"                                          → MODE: direct_answer
+  "what year was Docker released?"                          → MODE: direct_answer
+  "check disk usage"                                        → MODE: execution
+  "create a file called notes.txt"                          → MODE: execution
+  "look up the latest Go release and write it to a file"    → MODE: tool_assisted
+  "what are the minecraft versions? save them to versions.txt" → MODE: tool_assisted
+  "research python async patterns"                          → MODE: tool_assisted
+  "do the thing"                                            → MODE: clarification
 
-Input: %s`, rawInput)
+USER MESSAGE: %s`, rawInput)
 }
 
 func parseInferenceResponse(sessionID, response string) domain.Task {
@@ -127,8 +138,18 @@ func parseInferenceResponse(sessionID, response string) domain.Task {
 	if task.Intent == "" {
 		task.Intent = "unknown"
 	}
-	if task.Mode == "" {
-		task.Mode = "conversation" // safe default: unknown → converse rather than risk executing commands
+
+	// Clamp mode to the valid set. If the LLM outputs anything else (e.g. "greeting",
+	// "Confirmation or agreement"), map it to conversation — the safest fallback.
+	validModes := map[string]bool{
+		"conversation":  true,
+		"direct_answer": true,
+		"execution":     true,
+		"tool_assisted": true,
+		"clarification": true,
+	}
+	if !validModes[task.Mode] {
+		task.Mode = "conversation"
 	}
 
 	return task

@@ -304,6 +304,48 @@ services:
     restart: unless-stopped
 
   # ---
+  # Catalyst: skill composition engine — named, reusable DAG workflows over Arsenal tools.
+  catalyst:
+    build:
+      context: .
+      dockerfile: services/catalyst/Dockerfile
+    environment:
+      CATALYST_PORT: "5353"
+      CATALYST_METRICS_PORT: "5354"
+      CATALYST_DB: /data/catalyst.db
+      BRAIN_ADDR: brain:8090
+    expose:
+      - "5353"
+      - "5354"
+    volumes:
+      - catalyst-data:/data
+    depends_on:
+      - brain
+    restart: unless-stopped
+
+  # ---
+  # Genesis: tool auto-generation — LLM drafts tool JSON, registers it in Arsenal.
+  genesis:
+    build:
+      context: .
+      dockerfile: services/genesis/Dockerfile
+    environment:
+      GENESIS_PORT: "4343"
+      GENESIS_METRICS_PORT: "4344"
+      GENESIS_DB: /data/genesis.db
+      INFERENCE_ADDR: inference:9090
+      ARSENAL_ADDR: arsenal:7373
+    expose:
+      - "4343"
+      - "4344"
+    volumes:
+      - genesis-data:/data
+    depends_on:
+      - inference
+      - arsenal
+    restart: unless-stopped
+
+  # ---
   # Overwatch: anomaly analysis engine — scrapes Prometheus and emits alerts to Nerva.
   overwatch:
     build:
@@ -397,6 +439,10 @@ volumes:
     name: cortex-vault-data
   arsenal-data:
     name: cortex-arsenal-data
+  catalyst-data:
+    name: cortex-catalyst-data
+  genesis-data:
+    name: cortex-genesis-data
   compass-data:
     name: cortex-compass-data
   sovereign-data:

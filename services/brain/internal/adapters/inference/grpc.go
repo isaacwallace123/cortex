@@ -30,9 +30,10 @@ func NewGRPCAdapter(addr string) (*GRPCAdapter, error) {
 	return &GRPCAdapter{client: inferencev1.NewInferenceServiceClient(conn)}, nil
 }
 
-func (a *GRPCAdapter) Complete(ctx context.Context, prompt string) (string, error) {
+func (a *GRPCAdapter) Complete(ctx context.Context, prompt string, temperature float32) (string, error) {
 	resp, err := a.client.Complete(ctx, &inferencev1.CompleteRequest{
-		Prompt: prompt,
+		Prompt:      prompt,
+		Temperature: temperature,
 	})
 	if err != nil {
 		return "", fmt.Errorf("inference.Complete rpc: %w", err)
@@ -40,9 +41,10 @@ func (a *GRPCAdapter) Complete(ctx context.Context, prompt string) (string, erro
 	return resp.GetText(), nil
 }
 
-func (a *GRPCAdapter) CompleteStream(ctx context.Context, prompt string) (<-chan string, error) {
+func (a *GRPCAdapter) CompleteStream(ctx context.Context, prompt string, temperature float32) (<-chan string, error) {
 	stream, err := a.client.CompleteStream(ctx, &inferencev1.CompleteRequest{
-		Prompt: prompt,
+		Prompt:      prompt,
+		Temperature: temperature,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("inference.CompleteStream rpc: %w", err)

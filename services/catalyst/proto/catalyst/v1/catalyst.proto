@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package catalyst.v1;
+
+option go_package = "github.com/isaacwallace123/cortex/services/catalyst/gen/catalyst/v1;catalystv1";
+
+// CatalystService is the skill composition engine.
+// Skills are named, reusable workflows composed from Arsenal tools.
+// Each skill is a DAG of steps; Catalyst expands parameter templates and
+// delegates execution to Brain.ExecutePlan.
+service CatalystService {
+  // CreateSkill registers a new skill definition.
+  rpc CreateSkill(CreateSkillRequest) returns (CreateSkillResponse);
+
+  // GetSkill retrieves a skill by name.
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+
+  // ListSkills returns all skills, optionally filtered by tag.
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+
+  // DeleteSkill removes a skill by name.
+  rpc DeleteSkill(DeleteSkillRequest) returns (DeleteSkillResponse);
+
+  // ExecuteSkill expands parameter templates, constructs a plan, and executes
+  // it via Brain. Returns per-step results.
+  rpc ExecuteSkill(ExecuteSkillRequest) returns (ExecuteSkillResponse);
+}
+
+// SkillStep is a single step inside a skill definition.
+// command_template may contain {{.param_name}} Go template placeholders that
+// are expanded at execution time with the values in ExecuteSkillRequest.params.
+message SkillStep {
+  int32  index            = 1; // 1-based step index
+  string description      = 2; // human-readable label
+  string executor         = 3; // "shell" | "filesystem" | "web" | "infer" | "crucible" | "atlas" | "courier"
+  string command_template = 4; // concrete command or Go template, e.g. "df -h {{.path}}"
+  string agent            = 5; // for courier/crucible only
+}
+
+// Skill is a named, versioned, reusable workflow.
+message Skill {
+  string            name        = 1; // unique identifier, e.g. "diagnose_disk"
+  string            description = 2; // what this skill does
+  repeated SkillStep steps      = 3; // ordered steps
+  repeated string   tags        = 4; // e.g. ["infra", "diagnostics"]
+  string            version     = 5; // semver, e.g. "1.0.0"
+  int64             created_at  = 6; // Unix timestamp
+}
+
+// --- CreateSkill ---
+
+message CreateSkillRequest {
+  Skill skill = 1;
+}
+
+message CreateSkillResponse {
+  Skill skill = 1;
+}
+
+// --- GetSkill ---
+
+message GetSkillRequest {
+  string name = 1;
+}
+
+message GetSkillResponse {
+  Skill skill = 1;
+}
+
+// --- ListSkills ---
+
+message ListSkillsRequest {
+  string tag = 1; // optional tag filter
+}
+
+message ListSkillsResponse {
+  repeated Skill skills = 1;
+}
+
+// --- DeleteSkill ---
+
+message DeleteSkillRequest {
+  string name = 1;
+}
+
+message DeleteSkillResponse {
+  bool deleted = 1;
+}
+
+// --- ExecuteSkill ---
+
+message ExecuteSkillRequest {
+  string            name       = 1; // skill to run
+  string            session_id = 2; // brain session for context continuity
+  map<string,string> params    = 3; // template substitution values
+}
+
+message SkillStepResult {
+  int32  step_index = 1;
+  string stdout     = 2;
+  string stderr     = 3;
+  int32  exit_code  = 4;
+  bool   skipped    = 5;
+}
+
+message ExecuteSkillResponse {
+  string                  session_id = 1;
+  repeated SkillStepResult results   = 2;
+}

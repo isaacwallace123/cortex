@@ -88,6 +88,16 @@ scrape_configs:
       - targets: ['courier:2021']
     metrics_path: /metrics
 
+  - job_name: catalyst
+    static_configs:
+      - targets: ['catalyst:5354']
+    metrics_path: /metrics
+
+  - job_name: genesis
+    static_configs:
+      - targets: ['genesis:4344']
+    metrics_path: /metrics
+
   - job_name: overwatch
     static_configs:
       - targets: ['overwatch:8484']

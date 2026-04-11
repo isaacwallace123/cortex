@@ -1,0 +1,88 @@
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    {{- include "cortex.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+      annotations:
+        {{- if $svc.metricsPort }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ $svc.metricsPort }}"
+        prometheus.io/path: "/metrics"
+        {{- end }}
+    spec:
+      nodeSelector:
+        {{- toYaml $.Values.nodeSelector | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $.Values.image.registry }}/cortex-{{ $name }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            {{- range $svc.ports }}
+            - name: {{ .name }}
+              containerPort: {{ .port }}
+            {{- end }}
+          env:
+            {{- range $key, $val := $svc.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+            {{- range $svc.secretEnv }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: cortex-secrets
+                  key: {{ .key }}
+            {{- end }}
+          {{- if or $svc.storage $svc.workspaceStorage $svc.dockerSocket }}
+          volumeMounts:
+            {{- if $svc.storage }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+            {{- if $svc.workspaceStorage }}
+            - name: workspace
+              mountPath: /workspace
+            {{- end }}
+            {{- if $svc.dockerSocket }}
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml $.Values.defaultResources | nindent 12 }}
+      {{- if or $svc.storage $svc.workspaceStorage $svc.dockerSocket }}
+      volumes:
+        {{- if $svc.storage }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: cortex-{{ $name }}-data
+        {{- end }}
+        {{- if $svc.workspaceStorage }}
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: cortex-{{ $name }}-workspace
+        {{- end }}
+        {{- if $svc.dockerSocket }}
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        {{- end }}
+      {{- end }}
+{{- end }}

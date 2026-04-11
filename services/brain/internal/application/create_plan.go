@@ -75,10 +75,15 @@ func (uc *CreatePlanUseCase) Execute(ctx context.Context, in CreatePlanInput) (C
 		// Without this, every turn is answered cold with no memory of prior exchanges.
 		convHistory := recall.BuildConversationHistory(sessionEvents)
 		if convHistory != "" {
-			inferCmd = "You are Cortex, a personal AI assistant. " +
-				"Continue the conversation naturally based on the history below. " +
-				"Do not repeat the history — just answer the final User message.\n\n" +
-				convHistory +
+			inferCmd = "You are Cortex, a helpful and direct AI assistant. " +
+				"Answer the user's latest message naturally and concisely. " +
+				"Do NOT comment on the conversation itself, do NOT say things like 'you're repeating yourself' or 'I see you said X before'. " +
+				"Do NOT summarise the history. Just respond to what the user said.\n\n" +
+				"Conversation so far:\n" + convHistory +
+				"\nUser: " + in.Task.RawInput + "\nCortex:"
+		} else {
+			inferCmd = "You are Cortex, a helpful and direct AI assistant. " +
+				"Answer the user's message naturally and concisely. Do not add unnecessary preamble.\n\n" +
 				"User: " + in.Task.RawInput + "\nCortex:"
 		}
 
@@ -204,17 +209,17 @@ func (uc *CreatePlanUseCase) Execute(ctx context.Context, in CreatePlanInput) (C
 // streaming at the transport level (tokens arrive incrementally at the brain,
 // reducing time-to-first-byte pressure on the inference service).
 func (uc *CreatePlanUseCase) completeStreaming(ctx context.Context, prompt string) (string, error) {
-	ch, err := uc.inference.CompleteStream(ctx, prompt)
+	ch, err := uc.inference.CompleteStream(ctx, prompt, 0.2)
 	if err != nil {
 		// Fall back to non-streaming if the adapter doesn't support it.
-		return uc.inference.Complete(ctx, prompt)
+		return uc.inference.Complete(ctx, prompt, 0.2)
 	}
 	var sb strings.Builder
 	for token := range ch {
 		sb.WriteString(token)
 	}
 	if sb.Len() == 0 {
-		return uc.inference.Complete(ctx, prompt)
+		return uc.inference.Complete(ctx, prompt, 0.2)
 	}
 	return sb.String(), nil
 }
@@ -228,9 +233,9 @@ func buildPlanPrompt(task domain.Task, priorContext string, agents []ports.Remot
 	modeConstraint := ""
 	switch task.Mode {
 	case "tool_assisted":
-		modeConstraint = "Mode: tool_assisted — run the command(s) first, then add ONE infer step that explains the results."
+		modeConstraint = "Mode: tool_assisted — gather data first (web search OR shell/filesystem commands), then add ONE infer step that explains or summarises the results. If the task involves looking something up or researching, use the web executor for the first step."
 	case "execution":
-		modeConstraint = "Mode: execution — shell/filesystem steps only. Do not add infer steps."
+		modeConstraint = "Mode: execution — shell/filesystem/web steps only. Do not add infer steps. For tasks that involve fetching information from the internet, use executor:web."
 	}
 
 	prior := ""
@@ -264,23 +269,27 @@ func buildPlanPrompt(task domain.Task, priorContext string, agents []ports.Remot
 	// fall back to the built-in static rules when the registry is empty.
 	toolSection := buildToolSection(tools)
 
-	return fmt.Sprintf(`You are a minimal Linux execution planner. Output ONLY STEP lines — no other text.
+	return fmt.Sprintf(`You are a precise task planner for an AI assistant named Cortex. Output ONLY STEP lines — no preamble, no explanation, no extra text.
 
 TASK
-Intent:  %s
+Intent:   %s
 Entities: %s
 %s
 %s%s%s%sRULES
-1. Plan ONLY the steps required for the intent above. Never add unrelated steps.
+1. Plan ONLY the steps needed for the stated intent. Never add unrelated setup steps.
 2. Use the absolute minimum number of steps. Most intents need exactly 1 step.
 3. Never exceed 5 steps.
 4. Use real commands. Never invent command names.
-5. [agent:...] for courier = device name; for crucible = runtime (python3/node/go/bash). Omit for atlas/shell/filesystem.
+5. For ANY task involving "look up", "find out", "search", "research", "what is the latest", "what are the versions" — use executor:web. The [command:...] for a web step is the search query string.
+6. [command:...] is REQUIRED for every step. Never omit it.
+7. For infer steps, [command:...] must be a full English instruction telling the model what to do with the prior output (e.g. "Summarise the search results and list the versions found.").
+8. To write content to a file use: [executor:filesystem] [command:write /workspace/<filename> <content>]
+9. [agent:...] required only for: courier (= device name) and crucible (= runtime). Omit for all others.
 
-FORMAT (reproduce exactly — no extra text before or after)
-STEP <n>: <short description> [executor:<type>] [agent:<value>] [command:<exact command>]
+FORMAT — every line must match exactly (no extra text, no blank lines between steps):
+STEP <n>: <short description> [executor:<type>] [command:<exact command or query>]
 
-PLAN (output STEP lines only):
+PLAN:
 `, task.Intent, entities, modeConstraint, agentSection, knowledgeSection, prior, toolSection)
 }
 
@@ -411,25 +420,36 @@ func (uc *CreatePlanUseCase) persistProjectPlan(ctx context.Context, response st
 func buildToolSection(tools []ports.RegistryTool) string {
 	if len(tools) == 0 {
 		return `AVAILABLE EXECUTORS (built-in)
-  shell      — standard coreutils on the local machine (date, df, ps, free, grep, etc.)
-  filesystem — /workspace operations only: ls, cat, mkdir, write <path> <content>, rm, stat
-  courier    — run a shell command on a REMOTE AGENT listed above; requires [agent:<device_name>]
-  infer      — tool_assisted mode only: self-contained analytical prompt as the command
-  crucible   — run code in an isolated Docker sandbox; use [agent:<runtime>] (python3/node/go/bash)
-  atlas      — run kubectl commands against the Kubernetes cluster (no [agent:] needed)
-  web        — internet access: use a search query OR a full https:// URL as the command
+  shell      — run any shell command on the local machine (date, df, ps, free, grep, cat, etc.)
+  filesystem — /workspace file operations: ls, cat, mkdir, write <path> <content>, rm, stat
+  web        — internet access: pass a search query OR a full https:// URL as the command
+  infer      — reasoning step (tool_assisted only): summarise or explain prior step outputs
+  courier    — run a command on a REMOTE AGENT; requires [agent:<device_name>]
+  crucible   — run code in an isolated sandbox; requires [agent:<runtime>] (python3/node/go/bash)
+  atlas      — run kubectl commands against the Kubernetes cluster
 
-REFERENCE EXAMPLES
-  local time       → STEP 1: Print time [executor:shell] [command:date]
-  disk space       → STEP 1: Show disk usage [executor:shell] [command:df -h]
-  write a file     → STEP 1: Write file [executor:filesystem] [command:write /workspace/out.txt Hello World]
-  remote disk      → STEP 1: Check disk on prod-server [executor:courier] [agent:prod-server] [command:df -h]
-  run python code  → STEP 1: Run Python script [executor:crucible] [agent:python3] [command:python3 -c "print('hello')"]
-  list k8s pods    → STEP 1: List pods [executor:atlas] [command:get pods -A]
-  web search       → STEP 1: Search the web [executor:web] [command:latest Go 1.25 release notes]
-  fetch a URL      → STEP 1: Fetch page [executor:web] [command:https://example.com]
-  disk + explain   → STEP 1: Check disk [executor:shell] [command:du -sh /* 2>/dev/null | sort -rh | head -20]
-                     STEP 2: Explain results [executor:infer] [command:Explain what the disk usage output shows.]
+DECISION GUIDE — pick the right executor:
+  "look something up" / "search" / "research" / "find out" → web
+  "create/write/save a file"                               → filesystem  [command:write /workspace/<name> <content>]
+  "run a command" / "check disk" / "list processes"        → shell
+  "explain" / "summarise" / "what does this mean"          → infer (after other steps have run)
+  "run python/node/go code"                                → crucible
+  "on remote machine X"                                    → courier
+
+REFERENCE EXAMPLES (copy the pattern exactly)
+  greet                 → STEP 1: Say hello [executor:infer] [command:Say hello to the user briefly.]
+  current time          → STEP 1: Print current time [executor:shell] [command:date]
+  disk usage            → STEP 1: Check disk [executor:shell] [command:df -h]
+  write a file          → STEP 1: Write file [executor:filesystem] [command:write /workspace/notes.txt Hello World]
+  web search            → STEP 1: Search the web [executor:web] [command:latest Minecraft version list]
+  fetch a page          → STEP 1: Fetch page [executor:web] [command:https://example.com]
+  research + save file  → STEP 1: Search web for versions [executor:web] [command:Minecraft Java Edition version history complete list]
+                          STEP 2: Write results to file [executor:filesystem] [command:write /workspace/versions.txt {results from step 1}]
+  disk + explain        → STEP 1: Check disk usage [executor:shell] [command:du -sh /* 2>/dev/null | sort -rh | head -20]
+                          STEP 2: Summarise findings [executor:infer] [command:Summarise what is using the most disk space.]
+  run python            → STEP 1: Run script [executor:crucible] [agent:python3] [command:python3 -c "print('hello')"]
+  k8s pods              → STEP 1: List pods [executor:atlas] [command:get pods -A]
+  remote check          → STEP 1: Check disk on server [executor:courier] [agent:prod-server] [command:df -h]
 
 `
 	}

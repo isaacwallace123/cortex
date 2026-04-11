@@ -1,0 +1,21 @@
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    {{- include "cortex.labels" $ | nindent 4 }}
+spec:
+  type: {{ $svc.serviceType | default "ClusterIP" }}
+  selector:
+    app: {{ $name }}
+  ports:
+    {{- range $svc.ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .port }}
+    {{- end }}
+{{- end }}

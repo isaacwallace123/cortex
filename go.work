@@ -9,11 +9,13 @@ use (
 	./services/arsenal
 	./services/atlas
 	./services/brain
+	./services/catalyst
 	./services/chat
 	./services/compass
 	./services/courier
 	./services/crucible
 	./services/forge
+	./services/genesis
 	./services/inference
 	./services/memory
 	./services/nerva

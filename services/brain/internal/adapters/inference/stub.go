@@ -12,8 +12,8 @@ func NewStubAdapter() *StubAdapter {
 	return &StubAdapter{}
 }
 
-func (a *StubAdapter) CompleteStream(ctx context.Context, prompt string) (<-chan string, error) {
-	text, err := a.Complete(ctx, prompt)
+func (a *StubAdapter) CompleteStream(_ context.Context, prompt string, _ float32) (<-chan string, error) {
+	text, err := a.Complete(context.Background(), prompt, 0)
 	ch := make(chan string, 1)
 	if err != nil {
 		close(ch)
@@ -28,28 +28,32 @@ func (a *StubAdapter) CompleteStream(ctx context.Context, prompt string) (<-chan
 	return ch, nil
 }
 
-func (a *StubAdapter) Complete(_ context.Context, prompt string) (string, error) {
-	if strings.Contains(prompt, "Extract the intent") {
+func (a *StubAdapter) Complete(_ context.Context, prompt string, _ float32) (string, error) {
+	// Prism (intent classification) prompt — detect by its unique header.
+	if strings.Contains(prompt, "strict intent classifier") || strings.Contains(prompt, "OUTPUT FORMAT") {
 		return stubParseResponse(prompt), nil
 	}
-	if strings.Contains(prompt, "execution planner") || strings.Contains(prompt, "Create a step-by-step plan") {
+	// Axiom (planning) prompt — detect by its unique header.
+	if strings.Contains(prompt, "precise task planner") || strings.Contains(prompt, "STEP <n>:") {
 		return stubPlanResponse(prompt), nil
 	}
-	return "INTENT: unknown\nENTITIES: NONE", nil
+	// Conversation / infer fallback.
+	return "I understand. How can I help you further?", nil
 }
 
 func stubParseResponse(prompt string) string {
-	// Simple keyword-based intent detection for the stub.
 	lower := strings.ToLower(prompt)
 	switch {
 	case strings.Contains(lower, "deploy"):
-		return "INTENT: deploy application\nENTITIES: application, kubernetes"
+		return "INTENT: deploy application\nENTITIES: application, kubernetes\nMODE: execution"
 	case strings.Contains(lower, "run") || strings.Contains(lower, "execute"):
-		return "INTENT: execute script\nENTITIES: script"
+		return "INTENT: execute script\nENTITIES: script\nMODE: execution"
 	case strings.Contains(lower, "list") || strings.Contains(lower, "show"):
-		return "INTENT: list resources\nENTITIES: resources"
+		return "INTENT: list resources\nENTITIES: resources\nMODE: execution"
+	case strings.Contains(lower, "search") || strings.Contains(lower, "look up") || strings.Contains(lower, "find"):
+		return "INTENT: search for information\nENTITIES: NONE\nMODE: tool_assisted"
 	default:
-		return "INTENT: general task\nENTITIES: NONE"
+		return "INTENT: general task\nENTITIES: NONE\nMODE: conversation"
 	}
 }
 
@@ -57,16 +61,16 @@ func stubPlanResponse(prompt string) string {
 	lower := strings.ToLower(prompt)
 	switch {
 	case strings.Contains(lower, "deploy"):
-		return `STEP 1: Build container image [executor:code]
-STEP 2: Push image to registry [executor:shell]
-STEP 3: Apply Kubernetes manifests [executor:k8s]
-STEP 4: Verify deployment health [executor:k8s]`
+		return `STEP 1: Build container image [executor:shell] [command:docker build -t app .]
+STEP 2: Push image to registry [executor:shell] [command:docker push app]
+STEP 3: Apply Kubernetes manifests [executor:atlas] [command:apply -f k8s/]
+STEP 4: Verify deployment health [executor:atlas] [command:rollout status deployment/app]`
 	case strings.Contains(lower, "execute script"):
-		return `STEP 1: Validate script file exists [executor:filesystem]
-STEP 2: Execute script [executor:shell]
-STEP 3: Capture and return output [executor:shell]`
+		return `STEP 1: Execute script [executor:shell] [command:bash script.sh]`
+	case strings.Contains(lower, "search") || strings.Contains(lower, "look up"):
+		return `STEP 1: Search the web [executor:web] [command:latest information]
+STEP 2: Summarise findings [executor:infer] [command:Summarise the search results clearly.]`
 	default:
-		return `STEP 1: Analyze request [executor:shell]
-STEP 2: Execute task [executor:shell]`
+		return `STEP 1: Execute task [executor:shell] [command:echo "done"]`
 	}
 }

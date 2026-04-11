@@ -1,0 +1,91 @@
+{{- if .Values.ollama.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cortex-ollama-models
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.ollama.storage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: ollama
+    {{- include "cortex.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      # Pull the configured model on first start before the main process begins.
+      initContainers:
+        - name: pull-model
+          image: ollama/ollama:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              ollama serve &
+              SERVER_PID=$!
+              echo "Waiting for ollama to be ready..."
+              until ollama list > /dev/null 2>&1; do sleep 2; done
+              echo "Pulling {{ .Values.ollama.model }}..."
+              ollama pull {{ .Values.ollama.model }}
+              kill $SERVER_PID
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - name: http
+              containerPort: 11434
+          env:
+            - name: OLLAMA_MODEL
+              value: {{ .Values.ollama.model | quote }}
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          resources:
+            {{- toYaml .Values.ollama.resources | nindent 12 }}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: cortex-ollama-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: ollama
+    {{- include "cortex.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: ollama
+  ports:
+    - name: http
+      port: 11434
+      targetPort: 11434
+{{- end }}

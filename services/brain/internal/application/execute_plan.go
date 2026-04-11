@@ -164,25 +164,48 @@ func (uc *ExecutePlanUseCase) selectExecutor(step domain.Step) (ports.StepExecut
 // runInfer calls the inference service directly for infer steps.
 // If prior step outputs are provided they are prepended to the prompt so the
 // LLM reasons about real results rather than hypothetical ones.
+// inferJunk is the set of useless placeholder commands the LLM sometimes generates
+// for infer steps when it doesn't know what prompt to write.
+var inferJunk = map[string]bool{
+	"direct answer": true,
+	"explain":       true,
+	"summarize":     true,
+	"summarise":     true,
+	"answer":        true,
+}
+
 func (uc *ExecutePlanUseCase) runInfer(ctx context.Context, step domain.Step, prior []stepOutput) domain.ExecutionResult {
+	cmd := strings.ToLower(strings.TrimSpace(step.Command))
+
+	// If the LLM gave a useless placeholder (e.g. "direct answer") and there are prior
+	// outputs, synthesise a meaningful prompt rather than sending garbage to the model.
+	if (inferJunk[cmd] || step.Command == "") && len(prior) > 0 {
+		step.Command = "Summarise the above results clearly and concisely."
+	}
+
 	prompt := step.Command
 	if len(prior) > 0 {
 		var sb strings.Builder
-		sb.WriteString("The following commands were run and produced this output:\n\n")
+		sb.WriteString("The following steps were executed and produced this output:\n\n")
 		for _, p := range prior {
-			sb.WriteString(fmt.Sprintf("Step %d (%s):\n%s\n\n", p.index, p.desc, p.stdout))
+			sb.WriteString(fmt.Sprintf("Step %d — %s:\n%s\n\n", p.index, p.desc, p.stdout))
 		}
-		sb.WriteString("Based on the above output, ")
-		sb.WriteString(strings.ToLower(strings.TrimRight(strings.TrimSpace(step.Command), ".")))
+		sb.WriteString(strings.TrimRight(strings.TrimSpace(step.Command), "."))
 		sb.WriteString(".")
 		prompt = sb.String()
+	} else if step.Command == "" {
+		return domain.ExecutionResult{
+			StepIndex:  step.Index,
+			Skipped:    true,
+			SkipReason: "infer step has no command and no prior context",
+		}
 	}
 
 	uc.log.Info("[Vector] routing step to inference",
 		slog.Int("step", step.Index),
 		slog.Bool("has_prior_context", len(prior) > 0),
 	)
-	answer, err := uc.inference.Complete(ctx, prompt)
+	answer, err := uc.inference.Complete(ctx, prompt, 0.7)
 	if err != nil {
 		uc.log.Error("[Vector] inference error", slog.String("error", err.Error()))
 		return domain.ExecutionResult{
@@ -336,22 +359,32 @@ func (uc *ExecutePlanUseCase) tryExecute(ctx context.Context, sessionID, planID 
 		}, true
 	}
 	if step.Command == "" {
-		reason := "no command provided"
-		uc.log.Warn("[Vector] skipping step with no command", slog.Int("step", step.Index))
-		_ = uc.telemetry.Emit(ctx, ports.Event{
-			Name: "vector.step.skipped",
-			Payload: map[string]any{
-				"session_id": sessionID,
-				"plan_id":    planID,
-				"step_index": step.Index,
-				"reason":     reason,
-			},
-		})
-		return domain.ExecutionResult{
-			StepIndex:  step.Index,
-			Skipped:    true,
-			SkipReason: reason,
-		}, true
+		// Web steps: derive the search query from the description rather than skipping.
+		// The LLM frequently forgets to include [command:...] for web searches.
+		if step.Executor == "web" && step.Description != "" {
+			uc.log.Info("[Vector] web step missing command — using description as query",
+				slog.Int("step", step.Index),
+				slog.String("query", step.Description),
+			)
+			step.Command = step.Description
+		} else {
+			reason := "no command provided"
+			uc.log.Warn("[Vector] skipping step with no command", slog.Int("step", step.Index))
+			_ = uc.telemetry.Emit(ctx, ports.Event{
+				Name: "vector.step.skipped",
+				Payload: map[string]any{
+					"session_id": sessionID,
+					"plan_id":    planID,
+					"step_index": step.Index,
+					"reason":     reason,
+				},
+			})
+			return domain.ExecutionResult{
+				StepIndex:  step.Index,
+				Skipped:    true,
+				SkipReason: reason,
+			}, true
+		}
 	}
 
 	// Sentinel: safety-check every executable command before it reaches an executor.
