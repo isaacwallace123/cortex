@@ -74,8 +74,25 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&apiURL, "api", envOr("CORTEX_API_URL", "http://localhost:8000"), "Cortex API URL")
-	rootCmd.PersistentFlags().StringVar(&apiKey, "key", envOr("CORTEX_API_KEY", ""), "API key")
+	// Load the config file so flag defaults can fall back to persisted values.
+	// Errors are silently ignored — missing or malformed config just means no defaults.
+	cfg, _ := client.LoadConfig()
+
+	defaultURL := envOr("CORTEX_API_URL", "")
+	if defaultURL == "" {
+		defaultURL = cfg.APIURL
+	}
+	if defaultURL == "" {
+		defaultURL = "http://localhost:8000"
+	}
+
+	defaultKey := envOr("CORTEX_API_KEY", "")
+	if defaultKey == "" {
+		defaultKey = cfg.APIKey
+	}
+
+	rootCmd.PersistentFlags().StringVar(&apiURL, "api", defaultURL, "Cortex API URL")
+	rootCmd.PersistentFlags().StringVar(&apiKey, "key", defaultKey, "API key")
 }
 
 func envOr(key, fallback string) string {

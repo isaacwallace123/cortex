@@ -212,6 +212,14 @@ services:
       - name: metrics
         port: 9091
     metricsPort: 9091
+    startupProbe:
+      initialDelaySeconds: 60
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
     env:
       OLLAMA_URL: "http://ollama:11434"
       INFERENCE_DEFAULT_MODEL: "llama3.2"
@@ -304,6 +312,12 @@ services:
       - name: grpc
         port: 8090
     metricsPort: 8080
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
     env:
       INFERENCE_ADDR: "inference:9090"
       MEMORY_ADDR: "memory:7070"

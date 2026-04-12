@@ -113,8 +113,11 @@ func (uc *CreatePlanUseCase) Execute(ctx context.Context, in CreatePlanInput) (C
 		return uc.handleProjectPlan(ctx, in)
 	}
 
-	// Query Arsenal for the current tool list to build a dynamic capability table.
-	registryTools, _ := uc.arsenal.ListTools(ctx)
+	// Query Arsenal and filter to the tools most relevant to this task so the
+	// planning prompt stays focused. All tools are fetched; only the top-N that
+	// overlap with the task's entities or intent are injected.
+	allTools, _ := uc.arsenal.ListTools(ctx)
+	registryTools := filterRelevantTools(allTools, in.Task.Intent, in.Task.Entities, 5)
 
 	// Query connected agents so Axiom can reference them in plans.
 	agents, agentErr := uc.courier.ListAgents(ctx)
@@ -209,17 +212,17 @@ func (uc *CreatePlanUseCase) Execute(ctx context.Context, in CreatePlanInput) (C
 // streaming at the transport level (tokens arrive incrementally at the brain,
 // reducing time-to-first-byte pressure on the inference service).
 func (uc *CreatePlanUseCase) completeStreaming(ctx context.Context, prompt string) (string, error) {
-	ch, err := uc.inference.CompleteStream(ctx, prompt, 0.2)
+	ch, err := uc.inference.CompleteStream(ctx, prompt, 0.1)
 	if err != nil {
 		// Fall back to non-streaming if the adapter doesn't support it.
-		return uc.inference.Complete(ctx, prompt, 0.2)
+		return uc.inference.Complete(ctx, prompt, 0.1)
 	}
 	var sb strings.Builder
 	for token := range ch {
 		sb.WriteString(token)
 	}
 	if sb.Len() == 0 {
-		return uc.inference.Complete(ctx, prompt, 0.2)
+		return uc.inference.Complete(ctx, prompt, 0.1)
 	}
 	return sb.String(), nil
 }
@@ -288,6 +291,20 @@ Entities: %s
 
 FORMAT — every line must match exactly (no extra text, no blank lines between steps):
 STEP <n>: <short description> [executor:<type>] [command:<exact command or query>]
+
+EXAMPLES — study these before writing the plan:
+STEP 1: Say hello [executor:infer] [command:Greet the user warmly and briefly.]
+---
+STEP 1: Check disk usage [executor:shell] [command:df -h]
+---
+STEP 1: Search the web [executor:web] [command:latest stable Go release version]
+STEP 2: Summarise findings [executor:infer] [command:Report the latest Go version found in the search results.]
+---
+STEP 1: Run Python script [executor:crucible] [agent:python3] [command:python3 -c "import math; print(math.pi)"]
+---
+STEP 1: List Kubernetes pods [executor:atlas] [command:get pods -A]
+---
+STEP 1: Write notes to file [executor:filesystem] [command:write /workspace/notes.txt Meeting notes: discussed Q3 goals]
 
 PLAN:
 `, task.Intent, entities, modeConstraint, agentSection, knowledgeSection, prior, toolSection)
@@ -481,6 +498,69 @@ func extractTag(body, prefix string) (remaining, value string) {
 	value = strings.TrimSpace(body[start+len(tag) : start+end])
 	remaining = strings.TrimSpace(body[:start] + body[start+end+1:])
 	return remaining, value
+}
+
+// filterRelevantTools scores each tool against the task intent and entities and
+// returns the top-n highest-scoring tools. Scoring is keyword-based: each match
+// of an entity or intent word against a tool's name, description, or tags adds 1
+// point. Tools with zero overlap are excluded. When the registry is empty or
+// nothing matches, the caller falls back to the built-in static executor list.
+func filterRelevantTools(tools []ports.RegistryTool, intent string, entities []string, n int) []ports.RegistryTool {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	// Build a normalised set of query terms from intent words + entities.
+	terms := make([]string, 0)
+	for _, word := range strings.Fields(strings.ToLower(intent)) {
+		if len(word) > 2 { // skip short stop words
+			terms = append(terms, word)
+		}
+	}
+	for _, e := range entities {
+		terms = append(terms, strings.ToLower(strings.TrimSpace(e)))
+	}
+	if len(terms) == 0 {
+		// No signal — return up to n tools unchanged.
+		if len(tools) <= n {
+			return tools
+		}
+		return tools[:n]
+	}
+
+	type scored struct {
+		tool  ports.RegistryTool
+		score int
+	}
+	var results []scored
+	for _, t := range tools {
+		haystack := strings.ToLower(t.Name + " " + t.Description + " " + strings.Join(t.Tags, " "))
+		score := 0
+		for _, term := range terms {
+			if strings.Contains(haystack, term) {
+				score++
+			}
+		}
+		if score > 0 {
+			results = append(results, scored{t, score})
+		}
+	}
+
+	// Sort by score descending (simple insertion sort — list is small).
+	for i := 1; i < len(results); i++ {
+		for j := i; j > 0 && results[j].score > results[j-1].score; j-- {
+			results[j], results[j-1] = results[j-1], results[j]
+		}
+	}
+
+	if len(results) > n {
+		results = results[:n]
+	}
+	out := make([]ports.RegistryTool, len(results))
+	for i, r := range results {
+		out[i] = r.tool
+	}
+	return out
 }
 
 func parsePlanResponse(sessionID, response string) domain.Plan {

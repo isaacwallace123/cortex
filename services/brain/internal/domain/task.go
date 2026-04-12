@@ -26,3 +26,16 @@ type Task struct {
 	// RawInput is the original unmodified user message used by Axiom for infer prompts.
 	RawInput string
 }
+
+var validModes = map[string]bool{
+	"conversation":  true,
+	"direct_answer": true,
+	"execution":     true,
+	"tool_assisted": true,
+	"clarification": true,
+}
+
+// ModeValid reports whether the task's Mode is one of the five recognised values.
+func (t *Task) ModeValid() bool {
+	return validModes[t.Mode]
+}

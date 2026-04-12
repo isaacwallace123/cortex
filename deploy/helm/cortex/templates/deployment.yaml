@@ -69,7 +69,36 @@ spec:
             {{- end }}
           {{- end }}
           resources:
+            {{- if $svc.resources }}
+            {{- toYaml $svc.resources | nindent 12 }}
+            {{- else }}
             {{- toYaml $.Values.defaultResources | nindent 12 }}
+            {{- end }}
+          {{- if $svc.metricsPort }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $svc.metricsPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $svc.metricsPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          {{- if $svc.startupProbe }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $svc.metricsPort }}
+            initialDelaySeconds: {{ $svc.startupProbe.initialDelaySeconds | default 60 }}
+            periodSeconds: 10
+            failureThreshold: 12
+          {{- end }}
+          {{- end }}
       {{- if or $svc.storage $svc.workspaceStorage $svc.dockerSocket }}
       volumes:
         {{- if $svc.storage }}

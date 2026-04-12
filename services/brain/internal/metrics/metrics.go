@@ -29,6 +29,13 @@ var (
 		Help:    "Duration of step execution by Vector (shell, filesystem, and future executors).",
 		Buckets: prometheus.DefBuckets,
 	})
+
+	// PrismFallbacksTotal counts how many times Prism fell back to conversation
+	// due to an invalid mode in the LLM output.
+	PrismFallbacksTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "cortex_prism_fallbacks_total",
+		Help: "Total number of times Prism received an invalid mode and fell back to conversation.",
+	})
 )
 
 func init() {
@@ -37,5 +44,6 @@ func init() {
 		PlansCreatedTotal,
 		StepsEvaluatedTotal,
 		StepExecDurationSeconds,
+		PrismFallbacksTotal,
 	)
 }

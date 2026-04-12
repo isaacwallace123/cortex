@@ -51,12 +51,26 @@ func (uc *ParseInputUseCase) Execute(ctx context.Context, in ParseInputInput) (P
 		slog.Int("input_len", len(in.RawInput)),
 	)
 
-	response, err := uc.inference.Complete(ctx, buildParsePrompt(in.RawInput), 0.1)
-	if err != nil {
-		return ParseInputOutput{}, fmt.Errorf("inference failed during parse_input: %w", err)
-	}
+	prompt := buildParsePrompt(in.RawInput)
 
-	task := parseInferenceResponse(in.SessionID, response)
+	const maxAttempts = 3
+	var task domain.Task
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		response, err := uc.inference.Complete(ctx, prompt, 0.0)
+		if err != nil {
+			return ParseInputOutput{}, fmt.Errorf("inference failed during parse_input: %w", err)
+		}
+		task = parseInferenceResponse(in.SessionID, response)
+		if task.ModeValid() {
+			break
+		}
+		uc.log.Warn("[Prism] invalid mode in LLM output, retrying",
+			slog.String("session_id", in.SessionID),
+			slog.String("raw_output", response),
+			slog.Int("attempt", attempt),
+		)
+		metrics.PrismFallbacksTotal.Inc()
+	}
 	task.RawInput = in.RawInput
 
 	uc.log.Info("[Prism] parsed input",
@@ -141,14 +155,7 @@ func parseInferenceResponse(sessionID, response string) domain.Task {
 
 	// Clamp mode to the valid set. If the LLM outputs anything else (e.g. "greeting",
 	// "Confirmation or agreement"), map it to conversation — the safest fallback.
-	validModes := map[string]bool{
-		"conversation":  true,
-		"direct_answer": true,
-		"execution":     true,
-		"tool_assisted": true,
-		"clarification": true,
-	}
-	if !validModes[task.Mode] {
+	if !task.ModeValid() {
 		task.Mode = "conversation"
 	}
 

@@ -19,9 +19,15 @@ import (
 
 const (
 	// DefaultTokenBudget is the approximate token limit for assembled context.
-	// 1 token ≈ 4 characters (rough English-language estimate).
-	DefaultTokenBudget  = 2000
-	approxCharsPerToken = 4
+	DefaultTokenBudget = 2000
+
+	// MaxSessionTurns caps how many prior turns are injected into prompts.
+	// Older turns are dropped so Vault knowledge always has room in the budget.
+	MaxSessionTurns = 10
+
+	// MinKnowledgeFraction is the minimum share of the token budget reserved
+	// for Vault knowledge, regardless of session history length.
+	MinKnowledgeFraction = 0.25
 )
 
 // Retrieved holds the raw results from Echo + Vault retrieval.
@@ -113,6 +119,11 @@ func BuildConversationHistory(events []ports.StoredEvent) string {
 		return ""
 	}
 
+	// Keep only the most recent MaxSessionTurns turns.
+	if len(turns) > MaxSessionTurns {
+		turns = turns[len(turns)-MaxSessionTurns:]
+	}
+
 	var sb strings.Builder
 	for _, t := range turns {
 		sb.WriteString(t.role + ": " + t.content + "\n")
@@ -172,6 +183,11 @@ func BuildSessionContext(events []ports.StoredEvent) string {
 		return ""
 	}
 
+	// Keep only the most recent MaxSessionTurns turns.
+	if len(turns) > MaxSessionTurns {
+		turns = turns[len(turns)-MaxSessionTurns:]
+	}
+
 	var sb strings.Builder
 	sb.WriteString("Prior turns in this session:\n")
 	for i, t := range turns {
@@ -197,31 +213,91 @@ func BuildKnowledgeContext(entries []ports.KnowledgeEntry) string {
 }
 
 // AssembleContext combines session and knowledge context into a single string
-// that fits within the given character budget.
+// that fits within the token budget.
 // Knowledge context is placed first (highest relevance), session context second.
-// Pass charBudget <= 0 to use the default (DefaultTokenBudget × approxCharsPerToken).
-func AssembleContext(sessionContext, knowledgeContext string, charBudget int) string {
-	if charBudget <= 0 {
-		charBudget = DefaultTokenBudget * approxCharsPerToken
+// Vault knowledge is guaranteed at least MinKnowledgeFraction of the budget so
+// long sessions cannot crowd it out entirely.
+// Pass tokenBudget <= 0 to use DefaultTokenBudget.
+func AssembleContext(sessionContext, knowledgeContext string, tokenBudget int) string {
+	if tokenBudget <= 0 {
+		tokenBudget = DefaultTokenBudget
 	}
 	var parts []string
-	remaining := charBudget
+	remaining := tokenBudget
 
-	if knowledgeContext != "" && remaining > 0 {
-		kc := truncate(knowledgeContext, remaining)
+	if knowledgeContext != "" {
+		// Reserve a minimum slice for knowledge regardless of session length.
+		knowledgeMin := int(float64(tokenBudget) * MinKnowledgeFraction)
+		knowledgeBudget := remaining
+		if knowledgeBudget < knowledgeMin {
+			knowledgeBudget = knowledgeMin
+		}
+		kc := truncateTokens(knowledgeContext, knowledgeBudget)
 		parts = append(parts, kc)
-		remaining -= len(kc)
+		remaining -= countTokens(kc)
 	}
 	if sessionContext != "" && remaining > 0 {
-		sc := truncate(sessionContext, remaining)
+		sc := truncateTokens(sessionContext, remaining)
 		parts = append(parts, sc)
 	}
 	return strings.Join(parts, "\n")
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
+// countTokens estimates the number of tokens in s using a word-piece heuristic:
+// split on whitespace and punctuation boundaries, count the resulting pieces.
+// This is more accurate than the 1-token-per-4-chars rule for code, JSON, and
+// non-English content.
+func countTokens(s string) int {
+	if s == "" {
+		return 0
 	}
-	return s[:max]
+	count := 0
+	inWord := false
+	for _, r := range s {
+		isAlnum := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r > 127
+		if isAlnum {
+			if !inWord {
+				count++
+				inWord = true
+			}
+		} else {
+			if inWord {
+				inWord = false
+			}
+			// Each punctuation/symbol character counts as its own token.
+			if r != ' ' && r != '\t' && r != '\n' && r != '\r' {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// truncateTokens returns a prefix of s that does not exceed maxTokens tokens.
+func truncateTokens(s string, maxTokens int) string {
+	if maxTokens <= 0 {
+		return ""
+	}
+	count := 0
+	inWord := false
+	for i, r := range s {
+		isAlnum := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r > 127
+		if isAlnum {
+			if !inWord {
+				count++
+				inWord = true
+			}
+		} else {
+			if inWord {
+				inWord = false
+			}
+			if r != ' ' && r != '\t' && r != '\n' && r != '\r' {
+				count++
+			}
+		}
+		if count > maxTokens {
+			return s[:i]
+		}
+	}
+	return s
 }
