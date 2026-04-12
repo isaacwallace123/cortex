@@ -36,7 +36,7 @@ spec:
         app: ollama
     spec:
       nodeSelector:
-        {{- toYaml .Values.nodeSelector | nindent 8 }}
+        node-role.kubernetes.io/ai: "true"
       # Pull the configured model on first start before the main process begins.
       initContainers:
         - name: pull-model

@@ -26,8 +26,13 @@ spec:
         prometheus.io/path: "/metrics"
         {{- end }}
     spec:
+      {{- if $svc.nodeSelector }}
+      nodeSelector:
+        {{- toYaml $svc.nodeSelector | nindent 8 }}
+      {{- else if $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml $.Values.nodeSelector | nindent 8 }}
+      {{- end }}
       {{- if or $svc.storage $svc.workspaceStorage }}
       securityContext:
         fsGroup: 65532

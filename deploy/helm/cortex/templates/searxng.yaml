@@ -77,8 +77,7 @@ spec:
       labels:
         app: searxng
     spec:
-      nodeSelector:
-        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      # SearXNG is a web service with no AI/GPU requirements — float freely.
       containers:
         - name: searxng
           image: searxng/searxng:latest

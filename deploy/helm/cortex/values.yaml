@@ -5,8 +5,9 @@ image:
   tag: 7987ab0b298eb8d7b56eb4e8557e5506adf5e2ba
   pullPolicy: Always
 # ── Node selector ─────────────────────────────────────────────────────────────
-nodeSelector:
-  node-role.kubernetes.io/ai: "true"
+# Global fallback — only applied when a service has no per-service nodeSelector.
+# Set to {} to let services float across any worker node by default.
+nodeSelector: {}
 # ── Default resource requests/limits for all Go services ─────────────────────
 defaultResources:
   requests:
@@ -62,6 +63,11 @@ ollama:
 #   serviceType       overrides ClusterIP (LoadBalancer for api + courier)
 #   env               plain env vars injected into the container
 #   secretEnv[]       list of {name, key} pulled from the cortex-secrets Secret
+#   nodeSelector      per-service node selector (overrides global; omit to float freely)
+#
+# Node placement strategy:
+#   - Data/stateless services (no nodeSelector): schedule on any worker
+#   - AI-compute services (inference, brain): pinned to the AI node
 services:
   # ── Data layer (stateful, no upstream deps) ────────────────────────────────
   memory:
@@ -206,6 +212,8 @@ services:
     imageTag: e57929a4a8f8c97128ebb7a1597acb8d50a4195e
   # ── Compute layer (stateless) ──────────────────────────────────────────────
   inference:
+    nodeSelector:
+      node-role.kubernetes.io/ai: "true"
     ports:
       - name: grpc
         port: 9090
@@ -304,6 +312,8 @@ services:
     imageTag: e57929a4a8f8c97128ebb7a1597acb8d50a4195e
   # ── Brain — central orchestrator ──────────────────────────────────────────
   brain:
+    nodeSelector:
+      node-role.kubernetes.io/ai: "true"
     ports:
       - name: http
         port: 8080
