@@ -962,25 +962,16 @@ func (m Model) cmdFetchPlan(input string) tea.Cmd {
 	}
 }
 
-// cmdRunSteps executes the given steps via the API.
+// cmdRunSteps executes all steps in a single /v1/run call so Brain can chain
+// prior outputs into subsequent infer steps (e.g. web results → synthesis).
 func (m Model) cmdRunSteps(sessionID, planID string, steps []client.Step) tea.Cmd {
 	api := m.api
 	return func() tea.Msg {
-		var results []client.StepResult
-		for _, step := range steps {
-			r, err := api.RunStep(sessionID, planID, step)
-			if err != nil {
-				results = append(results, client.StepResult{
-					StepIndex: step.Index,
-					Executor:  step.Executor,
-					Stderr:    err.Error(),
-					ExitCode:  -1,
-				})
-				continue
-			}
-			results = append(results, r)
+		resp, err := api.Run(sessionID, planID, steps)
+		if err != nil {
+			return apiErrMsg{err}
 		}
-		return runDoneMsg{results}
+		return runDoneMsg{results: resp.Results}
 	}
 }
 
