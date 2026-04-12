@@ -1,4 +1,3 @@
-// Workspace — workspace management service.
 package main
 
 import (
