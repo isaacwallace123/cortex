@@ -17,3 +17,30 @@ search:
   formats:
     - html
     - json
+
+engines:
+  - name: duckduckgo
+    engine: duckduckgo
+    categories: general
+    shortcut: ddg
+    disabled: false
+
+  - name: duckduckgo images
+    engine: duckduckgo_images
+    categories: images
+    shortcut: ddi
+    disabled: false
+
+  - name: wikipedia
+    engine: wikipedia
+    categories: general
+    shortcut: wp
+    disabled: false
+
+  - name: karmasearch
+    engine: karmasearch
+    disabled: true
+
+  - name: karmasearch videos
+    engine: karmasearch
+    disabled: true
