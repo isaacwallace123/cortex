@@ -1,0 +1,105 @@
+{{- if .Values.searxng.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: searxng
+    {{- include "cortex.labels" . | nindent 4 }}
+data:
+  settings.yml: |
+    use_default_settings: true
+
+    server:
+      secret_key: {{ .Values.searxng.secretKey | quote }}
+      limiter: false
+      image_proxy: false
+      port: 8080
+      bind_address: "0.0.0.0"
+
+    ui:
+      static_use_hash: true
+
+    search:
+      safe_search: 0
+      autocomplete: ""
+      default_lang: "en"
+      formats:
+        - html
+        - json
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: searxng
+    {{- include "cortex.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: searxng
+  template:
+    metadata:
+      labels:
+        app: searxng
+    spec:
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      containers:
+        - name: searxng
+          image: searxng/searxng:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/searxng/settings.yml
+              subPath: settings.yml
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: searxng-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: searxng
+    {{- include "cortex.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: searxng
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

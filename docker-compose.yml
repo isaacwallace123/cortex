@@ -364,6 +364,19 @@ services:
     restart: unless-stopped
 
   # ---
+  # Self-hosted metasearch engine. Beacon talks to this for web search.
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_BASE_URL: "http://searxng:8080"
+      SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY:-changeme-searxng-secret-key}
+    expose:
+      - "8080"
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: unless-stopped
+
+  # ---
   # Web search and HTTP fetch. Configure a search backend via env vars.
   beacon:
     build:
@@ -371,11 +384,13 @@ services:
       dockerfile: services/beacon/Dockerfile
     environment:
       BEACON_ADDR: :5252
-      BEACON_SEARXNG_URL: ${BEACON_SEARXNG_URL:-}
+      BEACON_SEARXNG_URL: "http://searxng:8080"
       BEACON_BRAVE_API_KEY: ${BEACON_BRAVE_API_KEY:-}
     expose:
       - "5252"
       - "5253"
+    depends_on:
+      - searxng
     restart: unless-stopped
 
   # ---
