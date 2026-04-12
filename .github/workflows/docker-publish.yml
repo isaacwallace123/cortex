@@ -149,7 +149,7 @@ jobs:
   update-chart:
     name: Update Helm chart image tag
     runs-on: ubuntu-latest
-    needs: build
+    needs: [changes, build]
     permissions:
       contents: write
 
@@ -159,13 +159,23 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: main
 
-      - name: Commit updated values.yaml
+      - name: Install yq
         run: |
-          sed -i "s|^  tag: .*|  tag: ${{ github.sha }}|" deploy/helm/cortex/values.yaml
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Bump per-service image tags
+        env:
+          SERVICES: ${{ needs.changes.outputs.services }}
+          SHA: ${{ github.sha }}
+        run: |
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            yq -i ".services.${svc}.imageTag = \"${SHA}\"" deploy/helm/cortex/values.yaml
+          done
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deploy/helm/cortex/values.yaml
           git diff --cached --quiet && echo "Nothing to commit" && exit 0
-          git commit -m "chore: bump image tag to ${{ github.sha }}"
+          git commit -m "chore: bump image tag for $(echo $SERVICES | jq -r 'join(", ")') to ${SHA}"
           git pull --rebase origin main
           git push

@@ -34,7 +34,7 @@ spec:
       {{- end }}
       containers:
         - name: {{ $name }}
-          image: "{{ $.Values.image.registry }}/cortex-{{ $name }}:{{ $.Values.image.tag }}"
+          image: "{{ $.Values.image.registry }}/cortex-{{ $name }}:{{ $svc.imageTag | default $.Values.image.tag }}"
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           ports:
             {{- range $svc.ports }}
