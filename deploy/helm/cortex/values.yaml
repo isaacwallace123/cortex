@@ -2,7 +2,7 @@
 # image.tag is updated automatically by the CI pipeline (git SHA) on every push.
 image:
   registry: ghcr.io/isaacwallace123
-  tag: af2a065a78d51dc5907c01c40022e1d3c5bc0e21
+  tag: 7987ab0b298eb8d7b56eb4e8557e5506adf5e2ba
   pullPolicy: Always
 
 # ── Node selector ─────────────────────────────────────────────────────────────
