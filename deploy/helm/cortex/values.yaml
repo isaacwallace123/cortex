@@ -263,6 +263,8 @@ services:
     dockerSocket: true
     env:
       CRUCIBLE_ADDR: ":7272"
+      CONTAINERD_ADDRESS: "/run/k3s/containerd/containerd.sock"
+      CONTAINERD_NAMESPACE: "crucible"
 
   beacon:
     ports:

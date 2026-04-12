@@ -16,7 +16,7 @@ type App struct {
 
 func Wire() *App {
 	log := cortexlog.Crucible()
-	log.Info("[Crucible] initialising Docker executor")
+	log.Info("[Crucible] initialising nerdctl executor")
 
 	exec := sandbox.NewExecutor()
 

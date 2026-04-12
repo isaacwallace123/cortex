@@ -1,8 +1,8 @@
-﻿// Package sandbox implements Docker-based isolated execution environments.
-// Each sandbox is a Docker container with: no network access, CPU/memory limits,
-// and a TTL-based auto-destroy. The Docker CLI is invoked via os/exec so the
-// Crucible service itself requires only that the docker binary is on PATH and
-// the Docker socket is mounted.
+// Package sandbox implements containerd-based isolated execution environments
+// via nerdctl. Each sandbox is a container with: no network access, CPU/memory
+// limits, and a TTL-based auto-destroy. nerdctl is invoked via os/exec; the
+// crucible service requires the containerd socket to be mounted at the path
+// given by CONTAINERD_ADDRESS (default /run/k3s/containerd/containerd.sock).
 package sandbox
 
 import (
@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// runtimeImages maps runtime names to Docker image references.
+// runtimeImages maps runtime names to container image references.
 var runtimeImages = map[string]string{
 	"python3": "python:3.12-slim",
 	"python":  "python:3.12-slim",
@@ -37,23 +37,26 @@ const (
 	DefaultMemoryLimit = "256m"
 	DefaultTimeoutSecs = 30
 	DefaultSandboxTTL  = 600 // seconds (10 min)
+
+	defaultContainerdAddress   = "/run/k3s/containerd/containerd.sock"
+	defaultContainerdNamespace = "crucible"
 )
 
-// Sandbox is an active Docker container available for code execution.
+// Sandbox is an active container available for code execution.
 type Sandbox struct {
 	SandboxID   string
 	Runtime     string
-	ContainerID string // Docker container name (same as SandboxID prefix)
+	ContainerID string // container name (same as SandboxID prefix)
 	CreatedAt   int64  // unix millis
 	TimeoutSecs int
 	expiresAt   time.Time
 }
 
-// Executor manages the lifecycle of Docker sandboxes.
+// Executor manages the lifecycle of nerdctl sandboxes.
 type Executor struct {
-	mu      sync.Mutex
-	active  map[string]*Sandbox // sandbox_id â†’ sandbox
-	stopGC  chan struct{}
+	mu     sync.Mutex
+	active map[string]*Sandbox // sandbox_id → sandbox
+	stopGC chan struct{}
 }
 
 // NewExecutor creates an Executor and starts the background TTL reaper.
@@ -69,7 +72,7 @@ func NewExecutor() *Executor {
 // Close stops the GC loop.
 func (e *Executor) Close() { close(e.stopGC) }
 
-// Create starts a new Docker container and registers it.
+// Create starts a new container sandbox and registers it.
 func (e *Executor) Create(ctx context.Context, runtime string, timeoutSecs int) (*Sandbox, error) {
 	image, ok := runtimeImages[strings.ToLower(runtime)]
 	if !ok {
@@ -96,7 +99,7 @@ func (e *Executor) Create(ctx context.Context, runtime string, timeoutSecs int) 
 		"sleep", fmt.Sprintf("%d", timeoutSecs),
 	}
 
-	if out, err := dockerRun(ctx, args...); err != nil {
+	if out, err := nerdctl(ctx, args...); err != nil {
 		return nil, fmt.Errorf("create sandbox %s: %w\n%s", id, err, out)
 	}
 
@@ -136,7 +139,7 @@ func (e *Executor) Exec(ctx context.Context, sandboxID, command, stdinInput stri
 	args = append(args, sb.ContainerID, "sh", "-c", command)
 
 	start := time.Now()
-	cmd := exec.CommandContext(ctx2, "docker", args...)
+	cmd := nerdctlCmd(ctx2, args...)
 	if stdinInput != "" {
 		cmd.Stdin = strings.NewReader(stdinInput)
 	}
@@ -161,20 +164,18 @@ func (e *Executor) Exec(ctx context.Context, sandboxID, command, stdinInput stri
 }
 
 // WriteFile writes content to an absolute path inside the sandbox.
-// Uses `docker exec -i ... sh -c "cat > /path"` to avoid temp files on the host.
 func (e *Executor) WriteFile(ctx context.Context, sandboxID, path, content string) error {
 	sb := e.get(sandboxID)
 	if sb == nil {
 		return fmt.Errorf("sandbox %s not found or expired", sandboxID)
 	}
-	// Ensure parent directory exists first.
 	dir := path[:strings.LastIndex(path, "/")+1]
 	if dir != "" && dir != "/" {
 		if _, _, _, _, err := e.Exec(ctx, sandboxID, "mkdir -p "+dir, "", 10); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", sb.ContainerID, "sh", "-c", "cat > "+path)
+	cmd := nerdctlCmd(ctx, "exec", "-i", sb.ContainerID, "sh", "-c", "cat > "+path)
 	cmd.Stdin = strings.NewReader(content)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
@@ -197,7 +198,7 @@ func (e *Executor) ReadFile(ctx context.Context, sandboxID, path string) (string
 	return stdout, nil
 }
 
-// Destroy stops and removes the Docker container.
+// Destroy stops and removes the container.
 func (e *Executor) Destroy(ctx context.Context, sandboxID string) (bool, error) {
 	e.mu.Lock()
 	sb, ok := e.active[sandboxID]
@@ -209,16 +210,16 @@ func (e *Executor) Destroy(ctx context.Context, sandboxID string) (bool, error) 
 	if !ok {
 		return false, nil
 	}
-	out, err := dockerRun(ctx, "rm", "-f", sb.ContainerID)
+	out, err := nerdctl(ctx, "rm", "-f", sb.ContainerID)
 	if err != nil {
 		return false, fmt.Errorf("destroy %s: %w\n%s", sandboxID, err, out)
 	}
 	return true, nil
 }
 
-// RunCode is a convenience wrapper: create â†’ exec â†’ destroy.
+// RunCode is a convenience wrapper: create → exec → destroy.
 func (e *Executor) RunCode(ctx context.Context, runtime, command, stdinInput string, timeoutSecs int) (stdout, stderr string, exitCode int, durationMs int64, err error) {
-	sb, err := e.Create(ctx, runtime, timeoutSecs+10) // sandbox lives slightly longer than exec timeout
+	sb, err := e.Create(ctx, runtime, timeoutSecs+10)
 	if err != nil {
 		return "", "", -1, 0, fmt.Errorf("create sandbox: %w", err)
 	}
@@ -238,7 +239,6 @@ func (e *Executor) List() []*Sandbox {
 	return out
 }
 
-// get returns the active sandbox for id, or nil if it doesn't exist.
 func (e *Executor) get(id string) *Sandbox {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -272,15 +272,33 @@ func (e *Executor) reapExpired() {
 
 	for _, sb := range expired {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_, _ = dockerRun(ctx, "rm", "-f", sb.ContainerID)
+		_, _ = nerdctl(ctx, "rm", "-f", sb.ContainerID)
 		cancel()
 	}
 }
 
-func dockerRun(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	// Forward DOCKER_HOST if set, so the service can reach a remote daemon.
-	cmd.Env = append(os.Environ())
+// nerdctlCmd builds an *exec.Cmd for nerdctl with the containerd address and
+// namespace injected via environment variables so every invocation targets the
+// correct socket without repeating flags.
+func nerdctlCmd(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "nerdctl", args...)
+	addr := os.Getenv("CONTAINERD_ADDRESS")
+	if addr == "" {
+		addr = defaultContainerdAddress
+	}
+	ns := os.Getenv("CONTAINERD_NAMESPACE")
+	if ns == "" {
+		ns = defaultContainerdNamespace
+	}
+	cmd.Env = append(os.Environ(),
+		"CONTAINERD_ADDRESS="+addr,
+		"CONTAINERD_NAMESPACE="+ns,
+	)
+	return cmd
+}
+
+func nerdctl(ctx context.Context, args ...string) (string, error) {
+	cmd := nerdctlCmd(ctx, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -299,4 +317,3 @@ func supportedRuntimes() string {
 	}
 	return strings.Join(keys, ", ")
 }
-

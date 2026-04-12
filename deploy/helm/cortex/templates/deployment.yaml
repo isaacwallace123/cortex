@@ -64,8 +64,8 @@ spec:
               mountPath: /workspace
             {{- end }}
             {{- if $svc.dockerSocket }}
-            - name: docker-sock
-              mountPath: /var/run/docker.sock
+            - name: containerd-sock
+              mountPath: /run/k3s/containerd/containerd.sock
             {{- end }}
           {{- end }}
           resources:
@@ -83,9 +83,9 @@ spec:
             claimName: cortex-{{ $name }}-workspace
         {{- end }}
         {{- if $svc.dockerSocket }}
-        - name: docker-sock
+        - name: containerd-sock
           hostPath:
-            path: /var/run/docker.sock
+            path: /run/k3s/containerd/containerd.sock
             type: Socket
         {{- end }}
       {{- end }}
