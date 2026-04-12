@@ -16,7 +16,11 @@ spec:
   hostnames:
     - {{ .Values.ingress.hostname | quote }}
   rules:
-    - backendRefs:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
         - group: ""
           kind: Service
           name: api
