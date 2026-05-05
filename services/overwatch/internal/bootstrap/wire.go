@@ -8,11 +8,13 @@ import (
 
 	"github.com/isaacwallace123/cortex/services/overwatch/internal/application"
 	overwatchlog "github.com/isaacwallace123/cortex/services/overwatch/internal/log"
+	"github.com/isaacwallace123/cortex/services/overwatch/internal/portfolio"
 )
 
 type App struct {
-	Analyzer *application.Analyzer
-	Logger   *slog.Logger
+	Analyzer        *application.Analyzer
+	PortfolioEngine *portfolio.Engine
+	Logger          *slog.Logger
 }
 
 func Wire() *App {
@@ -45,7 +47,20 @@ func Wire() *App {
 		slog.Int("interval_sec", intervalSec),
 	)
 
-	return &App{Analyzer: analyzer, Logger: log}
+	ollamaURL := envOr("OLLAMA_URL", "http://ollama:11434")
+	ollamaModel := envOr("OLLAMA_MODEL", "llama3.2")
+
+	portfolioIntervalSec := 300
+	if v := os.Getenv("PORTFOLIO_INTERVAL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			portfolioIntervalSec = n
+		}
+	}
+	portfolioInterval := time.Duration(portfolioIntervalSec) * time.Second
+
+	portfolioEngine := portfolio.NewEngine(prometheusURL, ollamaURL, ollamaModel, portfolioInterval, log)
+
+	return &App{Analyzer: analyzer, PortfolioEngine: portfolioEngine, Logger: log}
 }
 
 func envOr(key, fallback string) string {

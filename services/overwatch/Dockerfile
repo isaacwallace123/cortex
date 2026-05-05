@@ -24,5 +24,6 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /bin/overwatch /overwatch
 
 EXPOSE 8484
+EXPOSE 8000
 
 ENTRYPOINT ["/overwatch"]
