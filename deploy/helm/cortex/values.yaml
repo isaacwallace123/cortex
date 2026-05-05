@@ -362,7 +362,7 @@ services:
       OLLAMA_MODEL: "llama3.2"
       PORTFOLIO_API_ADDR: ":8000"
       PORTFOLIO_INTERVAL: "300"
-    imageTag: 2fc7a6f9f7a89a5e61a8e3c04759592742e510a8
+    imageTag: 41974c1ac4383cd44b1b52e45cabb7434162b651
   # ── API gateway — REST frontend (external-facing LoadBalancer) ────────────
   api:
     ports:
