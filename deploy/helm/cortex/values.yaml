@@ -24,7 +24,6 @@ ingress:
   gatewayName: envoy-gateway
   gatewayNamespace: networking
   sectionName: https-lan
-
 # ── SearXNG — self-hosted metasearch engine used by Beacon ───────────────────
 # When enabled, a SearXNG pod is deployed in the cortex namespace and
 # BEACON_SEARXNG_URL is automatically pointed at it.
@@ -32,7 +31,6 @@ searxng:
   enabled: true
   # Change this to any random string before deploying.
   secretKey: "changeme-searxng-secret-key"
-
 # ── Secrets (override via --set or a sealed-secrets / external-secrets flow) ──
 secrets:
   sovereignAdminPassword: "changeme"
@@ -364,7 +362,7 @@ services:
       OLLAMA_MODEL: "llama3.2"
       PORTFOLIO_API_ADDR: ":8000"
       PORTFOLIO_INTERVAL: "300"
-    imageTag: e57929a4a8f8c97128ebb7a1597acb8d50a4195e
+    imageTag: 2fc7a6f9f7a89a5e61a8e3c04759592742e510a8
   # ── API gateway — REST frontend (external-facing LoadBalancer) ────────────
   api:
     ports:
