@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// Engine periodically collects cluster state from Prometheus and builds insights
-// for the portfolio REST API.
+// Engine periodically collects cluster state and builds insights for the portfolio REST API.
 type Engine struct {
 	prom     *promClient
+	k8s      *k8sClient
 	ollama   *ollamaClient
 	store    *Store
 	interval time.Duration
@@ -19,8 +19,13 @@ type Engine struct {
 }
 
 func NewEngine(prometheusURL, ollamaURL, ollamaModel string, interval time.Duration, log *slog.Logger) *Engine {
+	k8s, err := newInClusterK8sClient()
+	if err != nil {
+		log.Warn("[Portfolio] k8s in-cluster client unavailable — pod/node data will be empty", slog.String("err", err.Error()))
+	}
 	return &Engine{
 		prom:     newPromClient(prometheusURL),
+		k8s:      k8s,
 		ollama:   newOllamaClient(ollamaURL, ollamaModel),
 		store:    NewStore(),
 		interval: interval,
@@ -49,52 +54,95 @@ func (e *Engine) Run(ctx context.Context) {
 // ── cluster-level insight ────────────────────────────────────────────────────
 
 type clusterMetrics struct {
-	readyNodes  int
-	totalNodes  int
-	runningPods int
-	problemPods int
-	restartRate float64 // restarts/min
-	oomCount    int
+	readyNodes      int
+	totalNodes      int
+	runningPods     int
+	problemPods     int
+	highRestartPods int
+	oomCount        int
+	avgCPUPct       float64
+	avgMemPct       float64
 }
 
 func (e *Engine) refresh(ctx context.Context) {
 	now := time.Now()
 
-	cm := e.collectCluster(ctx)
+	// Fetch all pods once and reuse for both cluster and per-app insights.
+	var pods *PodList
+	if e.k8s != nil {
+		if p, err := e.k8s.ListPods(ctx); err == nil {
+			pods = p
+		} else {
+			e.log.Warn("[Portfolio] ListPods failed", slog.String("err", err.Error()))
+		}
+	}
+
+	cm := e.collectCluster(ctx, pods)
 	ins := e.buildInsight(ctx, now, cm)
 	e.store.AddInsight(ins)
 
-	pods := e.collectAllPodMetrics(ctx)
-	for key, pm := range pods {
+	appMap := e.collectAllPodMetrics(pods)
+	for key, pm := range appMap {
 		ns, app, _ := strings.Cut(key, "/")
 		e.store.SetPodInsight(ns, app, e.buildPodInsight(now, ns, app, pm))
 	}
 	e.log.Info("[Portfolio] refresh complete",
 		slog.String("status", ins.Status),
-		slog.Int("apps", len(pods)),
+		slog.Int("nodes", cm.totalNodes),
+		slog.Int("pods", cm.runningPods),
+		slog.Int("apps", len(appMap)),
 	)
 }
 
-func (e *Engine) collectCluster(ctx context.Context) clusterMetrics {
+func (e *Engine) collectCluster(ctx context.Context, pods *PodList) clusterMetrics {
 	var cm clusterMetrics
-	if rows, err := e.prom.queryVector(ctx, `kube_node_status_condition{condition="Ready",status="true"}`); err == nil {
-		cm.readyNodes = len(rows)
+
+	// Node data from k8s API.
+	if e.k8s != nil {
+		if nodes, err := e.k8s.ListNodes(ctx); err == nil {
+			for _, n := range nodes.Items {
+				cm.totalNodes++
+				for _, c := range n.Status.Conditions {
+					if c.Type == "Ready" && c.Status == "True" {
+						cm.readyNodes++
+					}
+				}
+			}
+		} else {
+			e.log.Warn("[Portfolio] ListNodes failed", slog.String("err", err.Error()))
+		}
 	}
-	if rows, err := e.prom.queryVector(ctx, `kube_node_info`); err == nil {
-		cm.totalNodes = len(rows)
+
+	// Pod data from the already-fetched list.
+	if pods != nil {
+		for _, p := range pods.Items {
+			switch p.Status.Phase {
+			case "Running":
+				cm.runningPods++
+			case "Failed", "Unknown", "Pending":
+				cm.problemPods++
+			}
+			restarts := 0
+			for _, cs := range p.Status.ContainerStatuses {
+				restarts += cs.RestartCount
+				if cs.LastState.Terminated != nil && cs.LastState.Terminated.Reason == "OOMKilled" {
+					cm.oomCount++
+				}
+			}
+			if restarts >= 5 {
+				cm.highRestartPods++
+			}
+		}
 	}
-	if v, ok, _ := e.prom.queryScalar(ctx, `count(kube_pod_status_phase{phase="Running"})`); ok {
-		cm.runningPods = int(v)
+
+	// Performance metrics from node-exporter via Prometheus.
+	if v, ok, _ := e.prom.queryScalar(ctx, `100-(avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))*100)`); ok {
+		cm.avgCPUPct = v
 	}
-	if v, ok, _ := e.prom.queryScalar(ctx, `count(kube_pod_status_phase{phase=~"Failed|Pending|Unknown"})`); ok {
-		cm.problemPods = int(v)
+	if v, ok, _ := e.prom.queryScalar(ctx, `(1-avg(node_memory_MemAvailable_bytes/node_memory_MemTotal_bytes))*100`); ok {
+		cm.avgMemPct = v
 	}
-	if v, ok, _ := e.prom.queryScalar(ctx, `sum(rate(kube_pod_container_status_restarts_total[15m]))*60`); ok {
-		cm.restartRate = v
-	}
-	if v, ok, _ := e.prom.queryScalar(ctx, `count(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"})`); ok {
-		cm.oomCount = int(v)
-	}
+
 	return cm
 }
 
@@ -124,11 +172,11 @@ func (e *Engine) buildInsight(ctx context.Context, t time.Time, cm clusterMetric
 		})
 		ins.Recommendations = append(ins.Recommendations, "Check pod events and logs for Failed/Pending pods.")
 	}
-	if cm.restartRate > 0.5 {
+	if cm.highRestartPods > 0 {
 		ins.Anomalies = append(ins.Anomalies, Anomaly{
 			Severity:    "warning",
-			Type:        "high_restart_rate",
-			Description: fmt.Sprintf("Container restart rate %.2f/min", cm.restartRate),
+			Type:        "crash_looping",
+			Description: fmt.Sprintf("%d pod(s) have ≥5 container restarts", cm.highRestartPods),
 			Affected:    "cluster",
 		})
 		ins.Recommendations = append(ins.Recommendations, "Review logs for crash-looping containers.")
@@ -141,6 +189,24 @@ func (e *Engine) buildInsight(ctx context.Context, t time.Time, cm clusterMetric
 			Affected:    "cluster",
 		})
 		ins.Recommendations = append(ins.Recommendations, "Increase memory limits for OOM-killed containers.")
+	}
+	if cm.avgCPUPct > 85 {
+		ins.Anomalies = append(ins.Anomalies, Anomaly{
+			Severity:    "warning",
+			Type:        "high_cpu",
+			Description: fmt.Sprintf("Average node CPU usage %.1f%%", cm.avgCPUPct),
+			Affected:    "cluster",
+		})
+		ins.Recommendations = append(ins.Recommendations, "Identify high-CPU pods and review resource limits.")
+	}
+	if cm.avgMemPct > 85 {
+		ins.Anomalies = append(ins.Anomalies, Anomaly{
+			Severity:    "warning",
+			Type:        "high_memory",
+			Description: fmt.Sprintf("Average node memory usage %.1f%%", cm.avgMemPct),
+			Affected:    "cluster",
+		})
+		ins.Recommendations = append(ins.Recommendations, "Review memory limits and consider scaling workloads.")
 	}
 
 	for _, a := range ins.Anomalies {
@@ -160,7 +226,8 @@ func (e *Engine) buildInsight(ctx context.Context, t time.Time, cm clusterMetric
 
 func (e *Engine) summarizeCluster(ctx context.Context, cm clusterMetrics, ins Insight) string {
 	if ins.Status == "healthy" {
-		return fmt.Sprintf("Cluster healthy: %d/%d nodes ready, %d pods running.", cm.readyNodes, cm.totalNodes, cm.runningPods)
+		return fmt.Sprintf("Cluster healthy: %d/%d nodes ready, %d pods running, CPU %.0f%%, mem %.0f%%.",
+			cm.readyNodes, cm.totalNodes, cm.runningPods, cm.avgCPUPct, cm.avgMemPct)
 	}
 
 	var anomalyLines strings.Builder
@@ -168,16 +235,18 @@ func (e *Engine) summarizeCluster(ctx context.Context, cm clusterMetrics, ins In
 		fmt.Fprintf(&anomalyLines, "- [%s] %s: %s\n", a.Severity, a.Type, a.Description)
 	}
 	prompt := fmt.Sprintf(
-		"You are a Kubernetes monitoring assistant. Write a single concise sentence summarizing the cluster state.\n\nMetrics:\n- Nodes: %d/%d ready\n- Running pods: %d, problem pods: %d\n- Restart rate: %.2f/min, OOM kills: %d\n\nAnomalies:\n%s\nWrite only the sentence, no JSON or markdown.",
-		cm.readyNodes, cm.totalNodes, cm.runningPods, cm.problemPods, cm.restartRate, cm.oomCount, anomalyLines.String(),
+		"You are a Kubernetes monitoring assistant. Write a single concise sentence summarizing the cluster state.\n\nMetrics:\n- Nodes: %d/%d ready\n- Running pods: %d, problem pods: %d\n- Restart pods: %d, OOM kills: %d\n- CPU: %.0f%%, Memory: %.0f%%\n\nAnomalies:\n%s\nWrite only the sentence, no JSON or markdown.",
+		cm.readyNodes, cm.totalNodes, cm.runningPods, cm.problemPods,
+		cm.highRestartPods, cm.oomCount, cm.avgCPUPct, cm.avgMemPct,
+		anomalyLines.String(),
 	)
 
 	lctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	text, err := e.ollama.chat(lctx, prompt)
 	if err != nil || strings.TrimSpace(text) == "" {
-		e.log.Warn("[Portfolio] ollama summary failed", slog.String("err", fmt.Sprintf("%v", err)))
-		return fmt.Sprintf("Cluster %s: %d/%d nodes ready, %d running pods, %d anomaly(s) detected.", ins.Status, cm.readyNodes, cm.totalNodes, cm.runningPods, len(ins.Anomalies))
+		return fmt.Sprintf("Cluster %s: %d/%d nodes ready, %d running pods, %d anomaly(s) detected.",
+			ins.Status, cm.readyNodes, cm.totalNodes, cm.runningPods, len(ins.Anomalies))
 	}
 	return strings.TrimSpace(text)
 }
@@ -191,60 +260,34 @@ type podAgg struct {
 	restarts float64
 }
 
-// collectAllPodMetrics fetches phase + restart data for all pods in one pass
-// and groups them by "namespace/label_app".
-func (e *Engine) collectAllPodMetrics(ctx context.Context) map[string]podAgg {
-	// app label assignments: pod key → app name
-	appOf := make(map[string]string) // "ns/pod" → app
-	if rows, err := e.prom.queryVector(ctx, `kube_pod_labels{label_app!=""}`); err == nil {
-		for _, r := range rows {
-			ns, pod, app := r.Labels["namespace"], r.Labels["pod"], r.Labels["label_app"]
-			if ns != "" && pod != "" && app != "" {
-				appOf[ns+"/"+pod] = app
-			}
-		}
-	}
-	if len(appOf) == 0 {
+func (e *Engine) collectAllPodMetrics(pods *PodList) map[string]podAgg {
+	if pods == nil {
 		return nil
 	}
-
-	result := make(map[string]podAgg) // "ns/app" → aggregated metrics
-
-	if rows, err := e.prom.queryVector(ctx, `kube_pod_status_phase`); err == nil {
-		for _, r := range rows {
-			ns, pod, phase := r.Labels["namespace"], r.Labels["pod"], r.Labels["phase"]
-			app, ok := appOf[ns+"/"+pod]
-			if !ok {
-				continue
-			}
-			key := ns + "/" + app
-			agg := result[key]
-			switch phase {
-			case "Running":
-				agg.running++
-			case "Failed":
-				agg.failed++
-			case "Pending":
-				agg.pending++
-			}
-			result[key] = agg
+	result := make(map[string]podAgg)
+	for _, p := range pods.Items {
+		app := p.Metadata.Labels["app"]
+		if app == "" {
+			app = p.Metadata.Labels["app.kubernetes.io/name"]
 		}
-	}
-
-	if rows, err := e.prom.queryVector(ctx, `kube_pod_container_status_restarts_total`); err == nil {
-		for _, r := range rows {
-			ns, pod := r.Labels["namespace"], r.Labels["pod"]
-			app, ok := appOf[ns+"/"+pod]
-			if !ok {
-				continue
-			}
-			key := ns + "/" + app
-			agg := result[key]
-			agg.restarts += r.Value
-			result[key] = agg
+		if app == "" {
+			continue
 		}
+		key := p.Metadata.Namespace + "/" + app
+		agg := result[key]
+		switch p.Status.Phase {
+		case "Running":
+			agg.running++
+		case "Failed":
+			agg.failed++
+		case "Pending":
+			agg.pending++
+		}
+		for _, cs := range p.Status.ContainerStatuses {
+			agg.restarts += float64(cs.RestartCount)
+		}
+		result[key] = agg
 	}
-
 	return result
 }
 
@@ -259,9 +302,9 @@ func (e *Engine) buildPodInsight(t time.Time, namespace, app string, pm podAgg) 
 	total := pm.running + pm.failed + pm.pending
 	if total == 0 {
 		pi.Status = "healthy"
-		pi.Diagnosis = "No metrics available yet."
-		pi.RootCause = "Prometheus may not have scraped this pod yet."
-		pi.Suggestions = []string{"Wait for the next scrape interval."}
+		pi.Diagnosis = "No pods found for this app."
+		pi.RootCause = "App may have scaled to zero or not yet scheduled."
+		pi.Suggestions = []string{"Check: kubectl get pods -n " + namespace + " -l app=" + app}
 		return pi
 	}
 
@@ -280,23 +323,24 @@ func (e *Engine) buildPodInsight(t time.Time, namespace, app string, pm podAgg) 
 	}
 	pi.Diagnosis = fmt.Sprintf("%d running, %d failed, %d pending, %.0f total restarts.", pm.running, pm.failed, pm.pending, pm.restarts)
 
-	if pm.restarts >= 5 && pm.failed == 0 {
-		pi.RootCause = "Containers are crash-looping — check application logs."
-		pi.Suggestions = []string{
-			"Run: kubectl logs -n " + namespace + " -l app=" + app + " --previous",
-			"Check resource limits: pod may be OOM-killed.",
-		}
-	} else if pm.failed > 0 {
+	switch {
+	case pm.failed > 0:
 		pi.RootCause = "One or more pods are in a Failed state."
 		pi.Suggestions = []string{
-			"Run: kubectl describe pod -n " + namespace + " -l app=" + app,
-			"Check events: kubectl get events -n " + namespace + " --sort-by=.lastTimestamp",
+			"kubectl describe pod -n " + namespace + " -l app=" + app,
+			"kubectl get events -n " + namespace + " --sort-by=.lastTimestamp",
 		}
-	} else {
+	case pm.pending > 0:
 		pi.RootCause = "Pods are pending — likely waiting for resources or volume mounts."
 		pi.Suggestions = []string{
-			"Check: kubectl describe pod -n " + namespace + " -l app=" + app,
+			"kubectl describe pod -n " + namespace + " -l app=" + app,
 			"Verify PVCs are bound and node resources are available.",
+		}
+	default:
+		pi.RootCause = "Containers are crash-looping — check application logs."
+		pi.Suggestions = []string{
+			"kubectl logs -n " + namespace + " -l app=" + app + " --previous",
+			"Check resource limits: pod may be OOM-killed.",
 		}
 	}
 	return pi

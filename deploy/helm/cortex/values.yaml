@@ -348,6 +348,7 @@ services:
   # Points at the existing cluster Prometheus, not a cortex-local one.
   # This means overwatch sees metrics from ALL namespaces, not just cortex.
   overwatch:
+    serviceAccountName: overwatch
     ports:
       - name: metrics
         port: 8484

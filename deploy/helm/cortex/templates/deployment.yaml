@@ -26,6 +26,9 @@ spec:
         prometheus.io/path: "/metrics"
         {{- end }}
     spec:
+      {{- if $svc.serviceAccountName }}
+      serviceAccountName: {{ $svc.serviceAccountName }}
+      {{- end }}
       {{- if $svc.nodeSelector }}
       nodeSelector:
         {{- toYaml $svc.nodeSelector | nindent 8 }}
