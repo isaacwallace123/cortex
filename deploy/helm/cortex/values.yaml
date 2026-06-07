@@ -296,7 +296,7 @@ services:
       - name: BEACON_SEARXNG_URL
         key: beaconSearxngUrl
     imageTag: e57929a4a8f8c97128ebb7a1597acb8d50a4195e
-  # ── Courier — relay hub (external-facing LoadBalancer) ────────────────────
+  # ── Courier — relay hub (cluster-internal; project deprecated) ────────────
   courier:
     ports:
       - name: grpc
@@ -304,7 +304,7 @@ services:
       - name: metrics
         port: 2021
     metricsPort: 2021
-    serviceType: LoadBalancer
+    serviceType: ClusterIP
     env:
       COURIER_ADDR: ":2020"
       NERVA_ADDR: "nerva:3030"
@@ -364,13 +364,13 @@ services:
       PORTFOLIO_API_ADDR: ":8000"
       PORTFOLIO_INTERVAL: "300"
     imageTag: 41974c1ac4383cd44b1b52e45cabb7434162b651
-  # ── API gateway — REST frontend (external-facing LoadBalancer) ────────────
+  # ── API gateway — REST frontend (cluster-internal; project deprecated) ────
   api:
     ports:
       - name: http
         port: 8000
     metricsPort: 8000
-    serviceType: LoadBalancer
+    serviceType: ClusterIP
     env:
       BRAIN_GRPC_ADDR: "brain:8090"
       MEMORY_GRPC_ADDR: "memory:7070"
